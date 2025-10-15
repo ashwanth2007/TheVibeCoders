@@ -1,18 +1,66 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { HistoryIcon } from './icons/HistoryIcon';
+import { PaperclipIcon } from './icons/PaperclipIcon';
+import { XIcon } from './icons/XIcon';
 
 interface PromptInputProps {
-    prompt: string;
-    setPrompt: (prompt: string) => void;
     initialPrompt: string;
     isEditing: boolean;
-    onGenerate: () => void;
-    onStartOver: () => void;
+    onGenerate: (prompt: string, image?: { base64: string, mimeType: string }) => void;
     isLoading: boolean;
     onToggleHistory: () => void;
 }
 
-export const PromptInput: React.FC<PromptInputProps> = ({ prompt, setPrompt, initialPrompt, isEditing, onGenerate, onStartOver, isLoading, onToggleHistory }) => {
+interface AttachedImage {
+    file: File;
+    base64: string;
+}
+
+export const PromptInput: React.FC<PromptInputProps> = ({ initialPrompt, isEditing, onGenerate, isLoading, onToggleHistory }) => {
+    const [prompt, setPrompt] = useState('');
+    const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleGenerateClick = () => {
+        if (!prompt.trim() && !attachedImage) return;
+
+        let imagePayload;
+        if (attachedImage) {
+            const base64Data = attachedImage.base64.split(',')[1];
+            imagePayload = {
+                base64: base64Data,
+                mimeType: attachedImage.file.type
+            };
+        }
+        onGenerate(prompt, imagePayload);
+        setPrompt('');
+        setAttachedImage(null);
+    };
+
+    const handleAttachClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setAttachedImage({
+                    file: file,
+                    base64: reader.result as string,
+                });
+            };
+            reader.readAsDataURL(file);
+        }
+        // Reset file input value to allow re-uploading the same file
+        event.target.value = '';
+    };
+    
+    const handleRemoveImage = () => {
+        setAttachedImage(null);
+    };
+
     return (
         <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
@@ -21,6 +69,22 @@ export const PromptInput: React.FC<PromptInputProps> = ({ prompt, setPrompt, ini
                         {isEditing ? 'Describe the changes you want to make' : 'Describe the web app you want to create'}
                     </label>
                     <div className="flex items-center gap-2">
+                         <button
+                            onClick={handleAttachClick}
+                            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors p-1 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900"
+                            aria-label="Attach an image"
+                            disabled={isLoading}
+                        >
+                            <PaperclipIcon aria-hidden="true" className="w-5 h-5" />
+                        </button>
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            onChange={handleFileChange}
+                            className="hidden"
+                            accept="image/*"
+                            aria-hidden="true"
+                        />
                         <button
                             onClick={onToggleHistory}
                             className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors p-1 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900"
@@ -48,12 +112,25 @@ export const PromptInput: React.FC<PromptInputProps> = ({ prompt, setPrompt, ini
                     disabled={isLoading}
                     aria-label={isEditing ? "Changes description" : "Web app description"}
                 />
+
+                {attachedImage && (
+                    <div className="relative w-32 h-32 mt-2 group animate-fade-in">
+                        <img src={attachedImage.base64} alt="Preview" className="w-full h-full object-cover rounded-lg border border-gray-300"/>
+                        <button 
+                            onClick={handleRemoveImage}
+                            className="absolute -top-2 -right-2 bg-gray-800 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-gray-900"
+                            aria-label="Remove attached image"
+                        >
+                            <XIcon className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
             </div>
             
             <div className={`flex gap-2 ${isEditing ? 'flex-row-reverse' : 'flex-col'}`}>
                 <button
-                    onClick={onGenerate}
-                    disabled={isLoading || !prompt.trim()}
+                    onClick={handleGenerateClick}
+                    disabled={isLoading || (!prompt.trim() && !attachedImage)}
                     className="w-full bg-gray-900 text-white font-semibold py-3 px-4 rounded-lg hover:bg-gray-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 flex items-center justify-center gap-2"
                     aria-busy={isLoading}
                 >
@@ -67,15 +144,6 @@ export const PromptInput: React.FC<PromptInputProps> = ({ prompt, setPrompt, ini
                         </>
                     ) : (isEditing ? 'Apply Changes' : 'Generate Web App')}
                 </button>
-                {isEditing && (
-                     <button
-                        onClick={onStartOver}
-                        disabled={isLoading}
-                        className="w-full bg-gray-300 text-gray-800 font-semibold py-3 px-4 rounded-lg hover:bg-gray-400 disabled:opacity-60 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900"
-                    >
-                        Reset Project
-                    </button>
-                )}
             </div>
         </div>
     );

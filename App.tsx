@@ -9,6 +9,7 @@ import { FullScreenIcon } from './components/icons/FullScreenIcon';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ProjectsSidebar } from './components/ProjectsSidebar';
 import { HistorySidebar } from './components/HistorySidebar';
+import { DeviceSelector, DeviceType } from './components/DeviceSelector';
 
 type ActiveTab = 'preview' | 'code';
 
@@ -31,12 +32,12 @@ export interface Project {
 const App: React.FC = () => {
     const [projects, setProjects] = useState<Project[]>([]);
     const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-    const [prompt, setPrompt] = useState<string>('');
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<ActiveTab>('preview');
     const [isProjectsSidebarOpen, setProjectsSidebarOpen] = useState<boolean>(true);
     const [isHistorySidebarOpen, setHistorySidebarOpen] = useState<boolean>(false);
+    const [previewDevice, setPreviewDevice] = useState<DeviceType>('current');
     
     const [isDragging, setIsDragging] = useState(false);
     const [leftPanelWidth, setLeftPanelWidth] = useState(33.33);
@@ -124,7 +125,6 @@ const App: React.FC = () => {
             setProjects(prev => [...prev, newProject]);
             setActiveProjectId(newProject.id);
             setProjectsSidebarOpen(true);
-            setPrompt('');
         } catch (e) {
             console.error(e);
             setError('Failed to generate the web app. Please check your API key and try again.');
@@ -133,7 +133,7 @@ const App: React.FC = () => {
         }
     }, []);
 
-    const handleGenerate = useCallback(async () => {
+    const handleGenerate = useCallback(async (prompt: string, image?: { base64: string; mimeType: string }) => {
         if (!prompt || isLoading || !activeProject) return;
 
         setIsLoading(true);
@@ -141,7 +141,7 @@ const App: React.FC = () => {
         setActiveTab('preview');
 
         try {
-            const files = await generateWebApp(prompt, isEditing ? currentFiles : undefined);
+            const files = await generateWebApp(prompt, isEditing ? currentFiles : undefined, image);
             const newEntry: HistoryEntry = { files, prompt, timestamp: Date.now() };
 
             setProjects(prevProjects => prevProjects.map(p => {
@@ -158,26 +158,13 @@ const App: React.FC = () => {
                 }
                 return p;
             }));
-            setPrompt(''); // Clear input for next edit
         } catch (e) {
             console.error(e);
             setError('Failed to generate the web app. Please check your API key and try again.');
         } finally {
             setIsLoading(false);
         }
-    }, [prompt, isLoading, activeProject, currentFiles, isEditing]);
-
-    const handleResetProject = useCallback(() => {
-        if (!activeProjectId) return;
-        // This effectively clears the project, ready for regeneration.
-        const originalProject = projects.find(p => p.id === activeProjectId);
-        if (originalProject) {
-            handleCreateProject(originalProject.name, originalProject.initialPrompt);
-        }
-        setPrompt('');
-        setError(null);
-        setActiveTab('preview');
-    }, [activeProjectId, projects, handleCreateProject]);
+    }, [isLoading, activeProject, currentFiles, isEditing]);
 
     const handleFilesChange = useCallback((newFiles: File[]) => {
         if (!activeProject) return;
@@ -330,12 +317,9 @@ const App: React.FC = () => {
                 <main ref={mainRef} className="flex-grow flex flex-row overflow-hidden">
                     <div id="left-panel" className="flex flex-col gap-4 p-4 lg:p-6 h-full overflow-y-auto" style={{ width: `${leftPanelWidth}%`}}>
                         <PromptInput
-                            prompt={prompt}
-                            setPrompt={setPrompt}
                             initialPrompt={activeProject.initialPrompt}
                             isEditing={isEditing}
                             onGenerate={handleGenerate}
-                            onStartOver={handleResetProject}
                             isLoading={isLoading}
                             onToggleHistory={() => setHistorySidebarOpen(prev => !prev)}
                         />
@@ -373,17 +357,20 @@ const App: React.FC = () => {
                             </button>
                             </div>
                             {activeTab === 'preview' && (
-                                <button 
-                                    onClick={handleFullScreen} 
-                                    className="flex items-center gap-2 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900"
-                                    aria-label="Enter full screen preview"
-                                >
-                                    <FullScreenIcon aria-hidden="true" className="w-4 h-4" />
-                                    Full screen
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    <DeviceSelector selectedDevice={previewDevice} onSelectDevice={setPreviewDevice} />
+                                    <button 
+                                        onClick={handleFullScreen} 
+                                        className="flex items-center gap-2 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900"
+                                        aria-label="Enter full screen preview"
+                                    >
+                                        <FullScreenIcon aria-hidden="true" className="w-4 h-4" />
+                                        Full screen
+                                    </button>
+                                </div>
                             )}
                         </div>
-                        <div className="relative w-full h-full flex-grow bg-white border-l border-gray-300">
+                        <div className="relative w-full h-full flex-grow border-l border-gray-300">
                             {isLoading && (
                                 <div role="status" className="absolute inset-0 flex items-center justify-center bg-gray-100/80 backdrop-blur-sm z-20">
                                 <div className="text-center">
@@ -393,11 +380,21 @@ const App: React.FC = () => {
                                 </div>
                                 </div>
                             )}
-                            <div 
-                                ref={previewContainerRef} 
-                                className={`w-full h-full ${activeTab === 'preview' ? 'block' : 'hidden'}`}
-                            >
-                                <LivePreview files={currentFiles} />
+                            <div className={`w-full h-full ${activeTab === 'preview' ? 'flex' : 'hidden'} items-center justify-center transition-colors duration-300 ${previewDevice !== 'current' ? 'bg-gray-400 p-4' : 'bg-white'}`}>
+                                <div 
+                                    ref={previewContainerRef} 
+                                    className="bg-white shadow-lg transition-all duration-300 ease-in-out"
+                                    style={{
+                                        width: previewDevice === 'current' ? '100%' : (previewDevice === 'mobile' ? '375px' : '768px'),
+                                        height: previewDevice === 'current' ? '100%' : (previewDevice === 'mobile' ? '667px' : '1024px'),
+                                        maxHeight: '100%',
+                                        overflow: 'hidden',
+                                        borderRadius: previewDevice !== 'current' ? '0.5rem' : '0',
+                                        border: previewDevice !== 'current' ? '1px solid #4a5568' : 'none',
+                                    }}
+                                >
+                                    <LivePreview files={currentFiles} />
+                                </div>
                             </div>
                             <div className={`w-full h-full ${activeTab === 'code' ? 'block' : 'hidden'}`}>
                                 <CodeDisplay 

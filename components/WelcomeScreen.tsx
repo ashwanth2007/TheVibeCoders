@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Spinner } from './Spinner';
+import { LoadingOverlay } from './LoadingOverlay';
 
 interface WelcomeScreenProps {
     onCreateProject: (name: string, prompt: string) => void;
@@ -43,90 +44,93 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onCreateProject, i
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100 px-4 py-12">
-            <div className="w-full max-w-3xl mx-auto">
-                <div className="text-center mb-8">
-                    <img src="https://codingweek.org/wp-content/uploads/2023/09/code-6622549_1280-768x768.png" alt="TheVibeCoders Logo" className="w-16 h-16 rounded-2xl mb-4 inline-block" />
-                    <h1 className="text-4xl font-bold text-gray-900 tracking-tight">TheVibeCoders</h1>
-                    <p className="mt-3 text-lg text-gray-600">Let's start by creating your first project.</p>
-                </div>
-                
-                <form onSubmit={handleSubmit} className="bg-white p-8 rounded-2xl shadow-lg border border-gray-200 flex flex-col gap-6">
-                    <div>
-                        <label htmlFor="app-name" className="block text-sm font-semibold text-gray-800 mb-2">
-                            App Name
-                        </label>
-                        <input
-                            id="app-name"
-                            type="text"
-                            value={appName}
-                            onChange={(e) => setAppName(e.target.value)}
-                            placeholder="e.g., My Awesome Portfolio"
-                            className="w-full p-3 border border-gray-300 bg-white text-gray-900 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-shadow duration-200"
-                            required
-                            disabled={isLoading}
-                        />
-                    </div>
-
-                    <div>
-                         <label htmlFor="app-prompt" className="block text-sm font-semibold text-gray-800 mb-2">
-                            What do you want to build?
-                        </label>
-                        <textarea
-                            id="app-prompt"
-                            value={appPrompt}
-                            onChange={(e) => setAppPrompt(e.target.value)}
-                            placeholder="Describe the web app you want to create. For example, 'A simple landing page for a new SaaS product...'"
-                            className="w-full p-3 border border-gray-300 bg-white text-gray-900 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-shadow duration-200 resize-y"
-                            rows={6}
-                            required
-                            disabled={isLoading}
-                        />
+        <>
+            <LoadingOverlay isVisible={isLoading} />
+            <div className={`min-h-screen flex items-center justify-center bg-gray-100 px-4 py-12 transition-all duration-300 ${isLoading ? 'blur-md' : ''}`}>
+                <div className="w-full max-w-3xl mx-auto">
+                    <div className="text-center mb-8">
+                        <img src="https://codingweek.org/wp-content/uploads/2023/09/code-6622549_1280-768x768.png" alt="TheVibeCoders Logo" className="w-16 h-16 rounded-2xl mb-4 inline-block" />
+                        <h1 className="text-4xl font-bold text-gray-900 tracking-tight">TheVibeCoders</h1>
+                        <p className="mt-3 text-lg text-gray-600">Let's start by creating your first project.</p>
                     </div>
                     
-                    <button
-                        type="submit"
-                        disabled={!canSubmit}
-                        className="w-full bg-gray-900 text-white font-semibold py-3 px-4 rounded-lg hover:bg-gray-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 flex items-center justify-center gap-2"
-                    >
-                        {isLoading ? (
-                            <>
-                                <Spinner />
-                                Creating Project...
-                            </>
-                        ) : (
-                            'Create App'
-                        )}
-                    </button>
-                </form>
+                    <form onSubmit={handleSubmit} className="bg-white p-8 rounded-2xl shadow-lg border border-gray-200 flex flex-col gap-6">
+                        <div>
+                            <label htmlFor="app-name" className="block text-sm font-semibold text-gray-800 mb-2">
+                                App Name
+                            </label>
+                            <input
+                                id="app-name"
+                                type="text"
+                                value={appName}
+                                onChange={(e) => setAppName(e.target.value)}
+                                placeholder="e.g., My Awesome Portfolio"
+                                className="w-full p-3 border border-gray-300 bg-white text-gray-900 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-shadow duration-200"
+                                required
+                                disabled={isLoading}
+                            />
+                        </div>
 
-                <div className="mt-10">
-                    <h2 className="text-center text-lg font-semibold text-gray-800 mb-1">Not sure where to start?</h2>
-                    <p className="text-center text-gray-600 mb-6">Try one of these examples.</p>
-                    
-                    <div className="flex flex-col gap-5">
-                        {Object.entries(categorizedPrompts).map(([category, prompts]) => (
-                            <div key={category} className="flex flex-col gap-3">
-                                <h3 className="font-semibold text-sm text-gray-800 tracking-wide uppercase">{category}</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {prompts.map((example) => (
-                                        <button
-                                            key={example.title}
-                                            onClick={() => handleExampleClick(example)}
-                                            className="text-sm text-left bg-white text-gray-800 hover:bg-gray-200 border border-gray-200 px-4 py-3 rounded-lg transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-gray-900"
-                                            disabled={isLoading}
-                                            title={example.prompt}
-                                        >
-                                            <span className="font-semibold">{example.title}</span>
-                                        </button>
-                                    ))}
+                        <div>
+                            <label htmlFor="app-prompt" className="block text-sm font-semibold text-gray-800 mb-2">
+                                What do you want to build?
+                            </label>
+                            <textarea
+                                id="app-prompt"
+                                value={appPrompt}
+                                onChange={(e) => setAppPrompt(e.target.value)}
+                                placeholder="Describe the web app you want to create. For example, 'A simple landing page for a new SaaS product...'"
+                                className="w-full p-3 border border-gray-300 bg-white text-gray-900 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-shadow duration-200 resize-y"
+                                rows={6}
+                                required
+                                disabled={isLoading}
+                            />
+                        </div>
+                        
+                        <button
+                            type="submit"
+                            disabled={!canSubmit}
+                            className="w-full bg-gray-900 text-white font-semibold py-3 px-4 rounded-lg hover:bg-gray-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 flex items-center justify-center gap-2"
+                        >
+                            {isLoading ? (
+                                <>
+                                    <Spinner />
+                                    Creating Project...
+                                </>
+                            ) : (
+                                'Create App'
+                            )}
+                        </button>
+                    </form>
+
+                    <div className="mt-10">
+                        <h2 className="text-center text-lg font-semibold text-gray-800 mb-1">Not sure where to start?</h2>
+                        <p className="text-center text-gray-600 mb-6">Try one of these examples.</p>
+                        
+                        <div className="flex flex-col gap-5">
+                            {Object.entries(categorizedPrompts).map(([category, prompts]) => (
+                                <div key={category} className="flex flex-col gap-3">
+                                    <h3 className="font-semibold text-sm text-gray-800 tracking-wide uppercase">{category}</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                        {prompts.map((example) => (
+                                            <button
+                                                key={example.title}
+                                                onClick={() => handleExampleClick(example)}
+                                                className="text-sm text-left bg-white text-gray-800 hover:bg-gray-200 border border-gray-200 px-4 py-3 rounded-lg transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-gray-900"
+                                                disabled={isLoading}
+                                                title={example.prompt}
+                                            >
+                                                <span className="font-semibold">{example.title}</span>
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
-                </div>
 
+                </div>
             </div>
-        </div>
+        </>
     );
 };
