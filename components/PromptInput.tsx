@@ -2,6 +2,8 @@ import React, { useState, useRef } from 'react';
 import { HistoryIcon } from './icons/HistoryIcon';
 import { PaperclipIcon } from './icons/PaperclipIcon';
 import { XIcon } from './icons/XIcon';
+import { MagicIcon } from './icons/MagicIcon';
+import { enhancePrompt } from '../services/geminiService';
 
 interface PromptInputProps {
     initialPrompt: string;
@@ -19,6 +21,8 @@ interface AttachedImage {
 export const PromptInput: React.FC<PromptInputProps> = ({ initialPrompt, isEditing, onGenerate, isLoading, onToggleHistory }) => {
     const [prompt, setPrompt] = useState('');
     const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
+    const [enhancedPrompt, setEnhancedPrompt] = useState<string | null>(null);
+    const [isEnhancing, setIsEnhancing] = useState<boolean>(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleGenerateClick = () => {
@@ -35,6 +39,33 @@ export const PromptInput: React.FC<PromptInputProps> = ({ initialPrompt, isEditi
         onGenerate(prompt, imagePayload);
         setPrompt('');
         setAttachedImage(null);
+        setEnhancedPrompt(null);
+    };
+
+    const handleEnhancePrompt = async () => {
+        if (!prompt.trim() || isEnhancing) return;
+        setIsEnhancing(true);
+        setEnhancedPrompt(null);
+        try {
+            const suggestion = await enhancePrompt(prompt);
+            setEnhancedPrompt(suggestion);
+        } catch (error) {
+            console.error("Failed to enhance prompt:", error);
+            // Optionally, show an error to the user
+        } finally {
+            setIsEnhancing(false);
+        }
+    };
+
+    const handleUseSuggestion = () => {
+        if (enhancedPrompt) {
+            setPrompt(enhancedPrompt);
+            setEnhancedPrompt(null);
+        }
+    };
+
+    const handleDismissSuggestion = () => {
+        setEnhancedPrompt(null);
     };
 
     const handleAttachClick = () => {
@@ -127,7 +158,39 @@ export const PromptInput: React.FC<PromptInputProps> = ({ initialPrompt, isEditi
                 )}
             </div>
             
-            <div className={`flex gap-2 ${isEditing ? 'flex-row-reverse' : 'flex-col'}`}>
+            {isEnhancing && (
+                <div className="text-center p-2 text-sm text-gray-600 animate-fade-in" role="status">
+                    Enhancing your prompt...
+                </div>
+            )}
+
+            {enhancedPrompt && !isEnhancing && (
+                <div className="p-4 border border-indigo-300 bg-indigo-50 rounded-lg text-sm text-indigo-900 animate-fade-in">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <strong className="font-semibold block mb-1">AI Suggestion:</strong>
+                            <p className="italic">"{enhancedPrompt}"</p>
+                        </div>
+                        <button 
+                            onClick={handleDismissSuggestion}
+                            className="p-1 rounded-full hover:bg-indigo-200 -mt-1 -mr-1 flex-shrink-0"
+                            aria-label="Dismiss suggestion"
+                        >
+                            <XIcon className="w-4 h-4" />
+                        </button>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                        <button 
+                            onClick={handleUseSuggestion}
+                            className="text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-500 px-3 py-1.5 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-600"
+                        >
+                            Use Suggestion
+                        </button>
+                    </div>
+                </div>
+            )}
+            
+            <div className={`flex ${isEditing ? 'flex-row items-center' : 'flex-col'} gap-2`}>
                 <button
                     onClick={handleGenerateClick}
                     disabled={isLoading || (!prompt.trim() && !attachedImage)}
@@ -144,6 +207,26 @@ export const PromptInput: React.FC<PromptInputProps> = ({ initialPrompt, isEditi
                         </>
                     ) : (isEditing ? 'Apply Changes' : 'Generate Web App')}
                 </button>
+                {isEditing && (
+                    <button
+                        type="button"
+                        onClick={handleEnhancePrompt}
+                        disabled={isLoading || isEnhancing || !prompt.trim()}
+                        className="p-3 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 disabled:opacity-60 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900"
+                        aria-label="Enhance prompt with AI"
+                        aria-busy={isEnhancing}
+                        title="Enhance prompt with AI"
+                    >
+                        {isEnhancing ? (
+                            <svg aria-hidden="true" className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        ) : (
+                            <MagicIcon className="w-5 h-5" />
+                        )}
+                    </button>
+                )}
             </div>
         </div>
     );

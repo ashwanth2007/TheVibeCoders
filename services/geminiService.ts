@@ -38,6 +38,8 @@ const EDITING_INSTRUCTION = `You are an expert web developer. Your task is to mo
 4.  **Return All Files:** You MUST return the complete, updated list of all files in the project, not just the ones you changed.
 5.  **Styling:** The project uses a separate 'style.css' file for styling. Do not add Tailwind CSS. Modify 'style.css' for style changes.`;
 
+const PROMPT_ENHANCEMENT_INSTRUCTION = `You are a prompt engineering expert. Your task is to rewrite the user's web development change request to be clearer, more detailed, and more effective for an AI agent to understand. Focus on actionable instructions. Respond only with the rewritten prompt, without any preamble or explanation.`;
+
 const fileSchema = {
     type: Type.OBJECT,
     properties: {
@@ -54,6 +56,22 @@ const fileSchema = {
         },
     },
     required: ['files'],
+};
+
+export const enhancePrompt = async (prompt: string): Promise<string> => {
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                systemInstruction: PROMPT_ENHANCEMENT_INSTRUCTION,
+            }
+        });
+        return response.text.trim();
+    } catch (error) {
+        console.error("Error enhancing prompt:", error);
+        throw new Error("Failed to communicate with the AI model for prompt enhancement.");
+    }
 };
 
 export const generateWebApp = async (prompt: string, baseFiles?: File[], image?: { base64: string; mimeType: string }): Promise<File[]> => {
