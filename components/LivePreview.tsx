@@ -3,6 +3,7 @@ import { File } from '../services/geminiService';
 
 interface LivePreviewProps {
     files: File[];
+    isSelectionModeActive: boolean;
 }
 
 const createBlobUrl = (htmlContent: string): string => {
@@ -10,7 +11,112 @@ const createBlobUrl = (htmlContent: string): string => {
     return URL.createObjectURL(blob);
 };
 
-export const LivePreview: React.FC<LivePreviewProps> = ({ files }) => {
+const elementSelectorScript = `
+<script>
+    // This script is injected into the iframe to handle element selection.
+    (function() {
+        const overlay = document.createElement('div');
+        overlay.style.position = 'absolute';
+        overlay.style.backgroundColor = 'rgba(66, 133, 244, 0.3)';
+        overlay.style.borderColor = '#4285F4';
+        overlay.style.borderStyle = 'solid';
+        overlay.style.borderWidth = '1px';
+        overlay.style.borderRadius = '3px';
+        overlay.style.pointerEvents = 'none';
+        overlay.style.zIndex = '9999';
+        overlay.style.transition = 'all 100ms ease';
+        let currentTarget = null;
+
+        function getCssSelector(el) {
+            if (!(el instanceof Element)) return;
+            const path = [];
+            while (el.nodeType === Node.ELEMENT_NODE) {
+                let selector = el.nodeName.toLowerCase();
+                if (el.id) {
+                    selector += '#' + el.id.trim();
+                    path.unshift(selector);
+                    break;
+                } else {
+                    let sib = el, nth = 1;
+                    while (sib = sib.previousElementSibling) {
+                        if (sib.nodeName.toLowerCase() == selector) nth++;
+                    }
+                    if (nth != 1) selector += ":nth-of-type("+nth+")";
+                }
+                path.unshift(selector);
+                el = el.parentNode;
+            }
+            return path.join(" > ");
+        }
+
+        function highlight(el) {
+            if (!el || el === document.body) {
+                hideHighlight();
+                return;
+            };
+            if (!document.body.contains(overlay)) {
+                document.body.appendChild(overlay);
+            }
+            const rect = el.getBoundingClientRect();
+            overlay.style.width = rect.width + 'px';
+            overlay.style.height = rect.height + 'px';
+            overlay.style.top = (rect.top + window.scrollY) + 'px';
+            overlay.style.left = (rect.left + window.scrollX) + 'px';
+            currentTarget = el;
+        }
+
+        function hideHighlight() {
+            if (document.body.contains(overlay)) {
+                document.body.removeChild(overlay);
+            }
+            currentTarget = null;
+        }
+
+        function handleMouseOver(e) {
+            highlight(e.target);
+        }
+
+        function handleMouseOut(e) {
+            hideHighlight();
+        }
+
+        function handleClick(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (currentTarget) {
+                const selector = getCssSelector(currentTarget);
+                const html = currentTarget.outerHTML;
+                window.parent.postMessage({ type: 'elementSelected', payload: { selector, html } }, '*');
+                cleanup();
+            }
+        }
+        
+        function handleScroll() {
+            if (currentTarget) {
+                highlight(currentTarget);
+            }
+        }
+
+        function cleanup() {
+            hideHighlight();
+            document.removeEventListener('mouseover', handleMouseOver, true);
+            document.removeEventListener('mouseout', handleMouseOut, true);
+            document.removeEventListener('click', handleClick, true);
+            window.removeEventListener('scroll', handleScroll, true);
+        }
+
+        document.addEventListener('mouseover', handleMouseOver, true);
+        document.addEventListener('mouseout', handleMouseOut, true);
+        document.addEventListener('click', handleClick, true);
+        window.addEventListener('scroll', handleScroll, true);
+
+        // Safety cleanup in case the parent removes the iframe
+        window.addEventListener('unload', cleanup);
+    })();
+</script>
+`;
+
+export const LivePreview: React.FC<LivePreviewProps> = ({ files, isSelectionModeActive }) => {
     const [activePath, setActivePath] = useState('index.html');
 
     // Reset to index.html when files change (e.g., new generation or project switch)
@@ -130,16 +236,18 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ files }) => {
                 }, true); // Use capture phase to catch event early
             </script>
         `;
+        
+        const finalScript = navigationScript + (isSelectionModeActive ? elementSelectorScript : '');
 
         // Add script before closing body tag
         if (processedHtml.includes('</body>')) {
-            processedHtml = processedHtml.replace('</body>', `${navigationScript}</body>`);
+            processedHtml = processedHtml.replace('</body>', `${finalScript}</body>`);
         } else {
-            processedHtml += navigationScript;
+            processedHtml += finalScript;
         }
     
         return processedHtml;
-    }, [files, activePath]);
+    }, [files, activePath, isSelectionModeActive]);
     
     // Using a blob URL for better isolation and to handle base URLs for relative paths within the HTML.
     const blobUrl = useMemo(() => {
@@ -158,7 +266,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ files }) => {
     }, [blobUrl]);
 
     return (
-        <div className="w-full h-full flex flex-col bg-white">
+        <div className={`w-full h-full flex flex-col bg-white ${isSelectionModeActive ? 'cursor-crosshair' : ''}`}>
             {files.length === 0 ? (
                  <div className="flex-grow flex items-center justify-center">
                     <div className="text-center text-gray-500 dark:text-zinc-400">

@@ -6,6 +6,7 @@ interface WelcomeScreenProps {
     onCreateProject: (name: string, prompt: string) => void;
     isLoading: boolean;
     logoUrl: string;
+    isStandalone?: boolean;
 }
 
 const categorizedPrompts = {
@@ -26,7 +27,7 @@ const categorizedPrompts = {
     ],
 };
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onCreateProject, isLoading, logoUrl }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onCreateProject, isLoading, logoUrl, isStandalone = false }) => {
     const [appName, setAppName] = useState('');
     const [appPrompt, setAppPrompt] = useState('');
 
@@ -47,8 +48,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onCreateProject, i
     return (
         <>
             <LoadingOverlay isVisible={isLoading} />
-            <div className={`relative min-h-screen flex items-center justify-center bg-gray-100 dark:bg-zinc-900 px-4 py-12 transition-all duration-300 ${isLoading ? 'blur-md' : ''}`}>
-                <div className="w-full max-w-3xl mx-auto">
+            <div className={`relative transition-all duration-300 bg-gray-100 dark:bg-zinc-900 ${isLoading ? 'blur-md' : ''} ${
+                isStandalone 
+                ? 'min-h-screen flex items-center justify-center px-4 py-12' 
+                : 'h-full flex flex-col pt-16' // Padding top to avoid floating menu button
+            }`}>
+                <div className={`w-full max-w-3xl mx-auto ${isStandalone ? '' : 'p-4 lg:p-8'}`}>
                     <div className="text-center mb-8">
                         <img src={logoUrl} alt="TheVibeCoders Logo" className="w-16 h-16 rounded-2xl mb-4 inline-block" />
                         <h1 className="text-4xl font-bold text-gray-900 dark:text-zinc-100 tracking-tight">TheVibeCoders</h1>

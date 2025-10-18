@@ -3,7 +3,8 @@ import { Header } from './components/Header';
 import { PromptInput } from './components/PromptInput';
 import { CodeDisplay } from './components/CodeDisplay';
 import { LivePreview } from './components/LivePreview';
-import { generateWebApp, File } from './services/geminiService';
+// FIX: Import `generateSuggestions` to correctly fetch improvement suggestions.
+import { generateWebApp, File, Suggestion, generateSuggestions } from './services/geminiService';
 import { Spinner } from './components/Spinner';
 import { FullScreenIcon } from './components/icons/FullScreenIcon';
 import { WelcomeScreen } from './components/WelcomeScreen';
@@ -11,8 +12,11 @@ import { ProjectsSidebar } from './components/ProjectsSidebar';
 import { HistorySidebar } from './components/HistorySidebar';
 import { DeviceSelector, DeviceType } from './components/DeviceSelector';
 import { DeleteConfirmationModal } from './components/DeleteConfirmationModal';
+import { MenuIcon } from './components/icons/MenuIcon';
+import { CursorClickIcon } from './components/icons/CursorClickIcon';
 
 type ActiveTab = 'preview' | 'code';
+type SelectedElement = { selector: string; html: string };
 
 export interface HistoryEntry {
     files: File[];
@@ -38,10 +42,15 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<ActiveTab>('preview');
-    const [isProjectsSidebarOpen, setProjectsSidebarOpen] = useState<boolean>(false);
+    const [isProjectsSidebarOpen, setProjectsSidebarOpen] = useState<boolean>(false); // Default to closed
+    const [isSidebarHovered, setSidebarHovered] = useState<boolean>(false);
     const [isHistorySidebarOpen, setHistorySidebarOpen] = useState<boolean>(false);
     const [previewDevice, setPreviewDevice] = useState<DeviceType>('current');
     const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+    const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+    const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState<boolean>(false);
+    const [isSelectionModeActive, setIsSelectionModeActive] = useState<boolean>(false);
+    const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
 
     
     const [isDragging, setIsDragging] = useState(false);
@@ -92,7 +101,8 @@ const App: React.FC = () => {
                 if (savedActiveId && migratedProjects.some(p => p.id === savedActiveId)) {
                     setActiveProjectId(savedActiveId);
                 } else if (migratedProjects.length > 0) {
-                    setActiveProjectId(migratedProjects[0].id);
+                     // Default to new project screen if there are projects but none are active
+                    setActiveProjectId(null);
                 }
             }
         } catch (e) {
@@ -113,6 +123,57 @@ const App: React.FC = () => {
             localStorage.removeItem('activeProjectId');
         }
     }, [projects, activeProjectId]);
+
+    useEffect(() => {
+        const fetchSuggestions = async () => {
+            if (activeProject && currentFiles.length > 0) {
+                setIsGeneratingSuggestions(true);
+                setSuggestions([]); // Clear old suggestions
+                try {
+                    // FIX: Use `generateSuggestions` instead of `generateWebApp`.
+                    // `generateWebApp` expects a string prompt and returns files, while `generateSuggestions`
+                    // correctly takes the current files and returns an array of suggestions.
+                    const newSuggestions = await generateSuggestions(currentFiles);
+                    setSuggestions(newSuggestions);
+                } catch (e) {
+                    console.error("Failed to generate suggestions", e);
+                } finally {
+                    setIsGeneratingSuggestions(false);
+                }
+            } else {
+                setSuggestions([]); // Clear suggestions if no active project or no files
+            }
+        };
+    
+        fetchSuggestions();
+    }, [activeProject, activeProject?.codeHistory.currentIndex]); // Re-run when active code changes
+    
+    // Listen for messages from the iframe (for element selection)
+    useEffect(() => {
+        const handleMessage = (event: MessageEvent) => {
+            if (event.data && event.data.type === 'elementSelected') {
+                const { selector, html } = event.data.payload;
+                setSelectedElement({ selector, html });
+                setIsSelectionModeActive(false); // Turn off selection mode after an element is chosen
+            }
+        };
+
+        window.addEventListener('message', handleMessage);
+        return () => {
+            window.removeEventListener('message', handleMessage);
+        };
+    }, []);
+
+    const handleToggleSelectionMode = () => {
+        setIsSelectionModeActive(prev => {
+            const newMode = !prev;
+            if (!newMode) {
+                // If we are turning the mode off manually, clear any selection
+                setSelectedElement(null);
+            }
+            return newMode;
+        });
+    };
     
     const handleCreateProject = useCallback(async (name: string, initialPrompt: string) => {
         setIsLoading(true);
@@ -134,7 +195,7 @@ const App: React.FC = () => {
             
             setProjects(prev => [...prev, newProject]);
             setActiveProjectId(newProject.id);
-            setProjectsSidebarOpen(false);
+            setProjectsSidebarOpen(false); // Close sidebar after creation
         } catch (e) {
             console.error(e);
             setError('Failed to generate the web app. Please check your API key and try again.');
@@ -149,10 +210,21 @@ const App: React.FC = () => {
         setIsLoading(true);
         setError(null);
         setActiveTab('preview');
+        
+        let finalPrompt = prompt;
+        // Prepend context to the prompt if an element is selected
+        if (selectedElement) {
+            finalPrompt = `The user has selected a specific element on the page to modify.
+- CSS Selector: \`${selectedElement.selector}\`
+- Element HTML: \`\`\`html\n${selectedElement.html}\n\`\`\`
+
+With this context, apply the following change: "${prompt}"`;
+        }
+
 
         try {
-            const files = await generateWebApp(prompt, isEditing ? currentFiles : undefined);
-            const newEntry: HistoryEntry = { files, prompt, timestamp: Date.now() };
+            const files = await generateWebApp(finalPrompt, isEditing ? currentFiles : undefined);
+            const newEntry: HistoryEntry = { files, prompt: prompt, timestamp: Date.now() }; // Store original prompt in history
 
             setProjects(prevProjects => prevProjects.map(p => {
                 if (p.id === activeProject.id) {
@@ -168,13 +240,14 @@ const App: React.FC = () => {
                 }
                 return p;
             }));
+             setSelectedElement(null); // Clear selection after successful generation
         } catch (e) {
             console.error(e);
             setError('Failed to generate the web app. Please check your API key and try again.');
         } finally {
             setIsLoading(false);
         }
-    }, [isLoading, activeProject, currentFiles, isEditing]);
+    }, [isLoading, activeProject, currentFiles, isEditing, selectedElement]);
 
     const handleFilesChange = useCallback((newFiles: File[]) => {
         if (!activeProject) return;
@@ -251,11 +324,14 @@ const App: React.FC = () => {
     const handleSelectProject = (projectId: string) => {
         setActiveProjectId(projectId);
         setProjectsSidebarOpen(false); // Close on mobile after selection
+        setSidebarHovered(false);
+        setSelectedElement(null); // Clear element selection when changing project
+        setIsSelectionModeActive(false);
     };
 
     const handleCreateNewApp = () => {
         setActiveProjectId(null);
-        setProjectsSidebarOpen(false);
+        setProjectsSidebarOpen(true);
     };
 
     const handleRenameProject = useCallback((projectId: string, newName: string) => {
@@ -268,19 +344,10 @@ const App: React.FC = () => {
 
     const handleDeleteProject = useCallback((projectId: string) => {
         setProjects(prevProjects => {
-            const projectIndex = prevProjects.findIndex(p => p.id === projectId);
-            if (projectIndex === -1) return prevProjects;
-    
             const newProjects = prevProjects.filter(p => p.id !== projectId);
             
             if (projectId === activeProjectId) {
-                if (newProjects.length > 0) {
-                    // Select the next item, or the last item if the deleted one was last
-                    const newActiveIndex = Math.min(projectIndex, newProjects.length - 1);
-                    setActiveProjectId(newProjects[newActiveIndex].id);
-                } else {
-                    setActiveProjectId(null);
-                }
+                setActiveProjectId(null); // Go to new project screen
             }
             
             return newProjects;
@@ -313,6 +380,14 @@ const App: React.FC = () => {
             setProjectToDelete(null);
         }
     };
+    
+    const handleToggleSidebar = useCallback(() => {
+        const willBeOpen = !isProjectsSidebarOpen;
+        setProjectsSidebarOpen(willBeOpen);
+        if (willBeOpen) {
+            setSidebarHovered(false); // If we pin it open, disable hover state
+        }
+    }, [isProjectsSidebarOpen]);
 
     const handleMouseDown = useCallback(() => setIsDragging(true), []);
     const handleMouseUp = useCallback(() => setIsDragging(false), []);
@@ -346,34 +421,23 @@ const App: React.FC = () => {
         };
     }, [isDragging, handleMouseMove, handleMouseUp]);
 
-    if (!activeProject && projects.length === 0) {
-        return <WelcomeScreen onCreateProject={handleCreateProject} isLoading={isLoading} logoUrl={LOGO_URL} />;
+    if (projects.length === 0) {
+        return <WelcomeScreen onCreateProject={handleCreateProject} isLoading={isLoading} logoUrl={LOGO_URL} isStandalone />;
     }
     
-    if (!activeProject && projects.length > 0) {
-        // This case handles the "Create New App" flow from the sidebar
-        return <WelcomeScreen onCreateProject={handleCreateProject} isLoading={isLoading} logoUrl={LOGO_URL} />;
-    }
+    const isSidebarEffectivelyOpen = isProjectsSidebarOpen || isSidebarHovered;
     
-    if (!activeProject) {
-        // This case should ideally not be reached if there are projects, but is a safeguard.
-        return <div className="flex items-center justify-center h-screen">Error: No active project selected.</div>;
-    }
-
     return (
         <div className="min-h-screen flex flex-col bg-gray-100 text-gray-900 dark:bg-zinc-900 dark:text-zinc-100">
-            <Header 
-                projectName={activeProject.name}
-                onToggleSidebar={() => setProjectsSidebarOpen(prev => !prev)}
-                activeProjectId={activeProject.id}
-                onRenameProject={handleRenameProject}
-                onCloneProject={handleCloneProject}
-                onSetProjectToDelete={() => setProjectToDelete(activeProject)}
-            />
             <div className="flex flex-grow overflow-hidden">
                 <ProjectsSidebar 
-                    isOpen={isProjectsSidebarOpen}
+                    isOpen={isSidebarEffectivelyOpen}
                     onClose={() => setProjectsSidebarOpen(false)}
+                    onMouseLeave={() => {
+                        if (!isProjectsSidebarOpen) { // Only close on leave if it's not pinned open
+                            setSidebarHovered(false);
+                        }
+                    }}
                     projects={projects}
                     activeProjectId={activeProjectId}
                     onSelectProject={handleSelectProject}
@@ -382,93 +446,158 @@ const App: React.FC = () => {
                     onSetProjectToDelete={setProjectToDelete}
                     onCloneProject={handleCloneProject}
                 />
-                <HistorySidebar
-                    isOpen={isHistorySidebarOpen}
-                    onClose={() => setHistorySidebarOpen(false)}
-                    history={activeProject.codeHistory.history}
-                    currentIndex={activeProject.codeHistory.currentIndex}
-                    onRestore={handleRestoreVersion}
-                />
-                <main ref={mainRef} className="flex-grow flex flex-row overflow-hidden">
-                    <div id="left-panel" className="flex flex-col gap-4 p-4 lg:p-6 h-full overflow-y-auto" style={{ width: `${leftPanelWidth}%`}}>
-                        <PromptInput
-                            initialPrompt={activeProject.initialPrompt}
-                            isEditing={isEditing}
-                            onGenerate={handleGenerate}
-                            isLoading={isLoading}
-                            onToggleHistory={() => setHistorySidebarOpen(prev => !prev)}
+                
+                <div className="flex-grow flex flex-col overflow-hidden">
+                    {activeProject && (
+                        <Header 
+                            projectName={activeProject.name}
+                            onToggleSidebar={handleToggleSidebar}
+                            activeProjectId={activeProject.id}
+                            onRenameProject={handleRenameProject}
+                            onCloneProject={handleCloneProject}
+                            onSetProjectToDelete={() => setProjectToDelete(activeProject)}
                         />
-                        {error && <div role="alert" className="text-red-600 bg-red-100 dark:text-red-400 dark:bg-red-900/30 p-3 rounded-md">{error}</div>}
-                    </div>
-                    
-                    <div 
-                        role="separator"
-                        aria-orientation="vertical"
-                        className="w-1.5 bg-gray-300 dark:bg-zinc-700 cursor-col-resize hover:bg-gray-400 dark:hover:bg-zinc-600 focus:bg-blue-500 dark:focus:bg-blue-400 focus:outline-none transition-colors"
-                        onMouseDown={handleMouseDown}
-                        tabIndex={0}
-                        aria-label="Resize panels"
-                    />
+                    )}
 
-                    <div id="right-panel" className="flex flex-col flex-grow" style={{ width: `${100 - leftPanelWidth}%`}}>
-                        <div role="tablist" aria-label="Output view" className="flex justify-between items-center p-2 px-4 bg-gray-200 dark:bg-zinc-800 border-b border-l border-gray-300 dark:border-zinc-700">
-                            <div className="flex items-center gap-2">
-                            <button 
-                                    role="tab"
-                                    aria-selected={activeTab === 'preview'}
-                                    onClick={() => setActiveTab('preview')} 
-                                    className={`px-3 py-1 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800 ${activeTab === 'preview' ? 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 shadow-sm' : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700'}`}
+                    <div className="relative flex-grow flex flex-row overflow-hidden">
+                         {!isProjectsSidebarOpen &&
+                            <div
+                                className="absolute left-0 top-0 h-full w-4 z-20"
+                                onMouseEnter={() => setSidebarHovered(true)}
+                            ></div>
+                        }
+
+                        {!activeProject && (
+                            <div className="absolute top-0 left-0 p-4 z-10">
+                                <button
+                                    onClick={handleToggleSidebar}
+                                    className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-zinc-100"
+                                    aria-label="Toggle projects sidebar"
                                 >
-                                    <span aria-hidden="true" className="mr-1.5">•</span>
-                                    Preview
-                            </button>
-                            <button 
-                                    role="tab"
-                                    aria-selected={activeTab === 'code'}
-                                    onClick={() => setActiveTab('code')} 
-                                    className={`px-3 py-1 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800 ${activeTab === 'code' ? 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 shadow-sm' : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700'}`}
-                            >
-                                    Code
-                            </button>
+                                    <MenuIcon className="w-5 h-5" />
+                                </button>
                             </div>
-                            {activeTab === 'preview' && (
-                                <div className="flex items-center gap-2">
-                                    <DeviceSelector selectedDevice={previewDevice} onSelectDevice={setPreviewDevice} />
-                                    <button 
-                                        onClick={handleFullScreen} 
-                                        className="flex items-center gap-2 px-3 py-1 text-sm font-medium text-gray-700 dark:text-zinc-300 hover:bg-gray-300 dark:hover:bg-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800"
-                                        aria-label="Enter full screen preview"
-                                    >
-                                        <FullScreenIcon aria-hidden="true" className="w-4 h-4" />
-                                        Full Screen
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                        <div ref={previewContainerRef} className="flex-grow bg-white dark:bg-zinc-900 border-l border-gray-300 dark:border-zinc-700 relative">
-                            {isLoading ? (
-                                <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-zinc-900/50">
-                                    <Spinner />
-                                </div>
-                            ) : null}
-                            <div className={`w-full h-full transition-all duration-300 mx-auto ${previewDevice === 'mobile' ? 'max-w-sm' : ''} ${previewDevice === 'tablet' ? 'max-w-3xl' : ''}`}>
-                                {activeTab === 'preview' && (
-                                    <LivePreview files={currentFiles} />
-                                )}
-                                {activeTab === 'code' && (
-                                    <CodeDisplay 
-                                        files={currentFiles} 
-                                        onFilesChange={handleFilesChange}
-                                        onUndo={handleUndo}
-                                        onRedo={handleRedo}
-                                        canUndo={canUndo}
-                                        canRedo={canRedo}
+                        )}
+
+                        {activeProject ? (
+                            <>
+                                <HistorySidebar
+                                    isOpen={isHistorySidebarOpen}
+                                    onClose={() => setHistorySidebarOpen(false)}
+                                    history={activeProject.codeHistory.history}
+                                    currentIndex={activeProject.codeHistory.currentIndex}
+                                    onRestore={handleRestoreVersion}
+                                />
+                                <main ref={mainRef} className="flex-grow flex flex-row overflow-hidden">
+                                    <div id="left-panel" className="flex flex-col gap-4 p-4 lg:p-6 h-full overflow-y-auto" style={{ width: `${leftPanelWidth}%`}}>
+                                        <PromptInput
+                                            initialPrompt={activeProject.initialPrompt}
+                                            isEditing={isEditing}
+                                            onGenerate={handleGenerate}
+                                            isLoading={isLoading}
+                                            onToggleHistory={() => setHistorySidebarOpen(prev => !prev)}
+                                            suggestions={suggestions}
+                                            isGeneratingSuggestions={isGeneratingSuggestions}
+                                            onDismissSuggestions={() => setSuggestions([])}
+                                            selectedElement={selectedElement}
+                                            onClearSelection={() => setSelectedElement(null)}
+                                        />
+                                        {error && <div role="alert" className="text-red-600 bg-red-100 dark:text-red-400 dark:bg-red-900/30 p-3 rounded-md">{error}</div>}
+                                    </div>
+                                    
+                                    <div 
+                                        role="separator"
+                                        aria-orientation="vertical"
+                                        className="w-1.5 bg-gray-300 dark:bg-zinc-700 cursor-col-resize hover:bg-gray-400 dark:hover:bg-zinc-600 focus:bg-blue-500 dark:focus:bg-blue-400 focus:outline-none transition-colors"
+                                        onMouseDown={handleMouseDown}
+                                        tabIndex={0}
+                                        aria-label="Resize panels"
                                     />
-                                )}
-                            </div>
-                        </div>
+
+                                    <div id="right-panel" className="flex flex-col flex-grow" style={{ width: `${100 - leftPanelWidth}%`}}>
+                                        <div role="tablist" aria-label="Output view" className="flex justify-between items-center p-2 px-4 bg-gray-200 dark:bg-zinc-800 border-b border-l border-gray-300 dark:border-zinc-700">
+                                            <div className="flex items-center gap-2">
+                                            <button 
+                                                    role="tab"
+                                                    aria-selected={activeTab === 'preview'}
+                                                    onClick={() => setActiveTab('preview')} 
+                                                    className={`px-3 py-1 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800 ${activeTab === 'preview' ? 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 shadow-sm' : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700'}`}
+                                                >
+                                                    <span aria-hidden="true" className="mr-1.5">•</span>
+                                                    Preview
+                                            </button>
+                                            <button 
+                                                    role="tab"
+                                                    aria-selected={activeTab === 'code'}
+                                                    onClick={() => setActiveTab('code')} 
+                                                    className={`px-3 py-1 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800 ${activeTab === 'code' ? 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 shadow-sm' : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700'}`}
+                                            >
+                                                    Code
+                                            </button>
+                                            </div>
+                                            {activeTab === 'preview' && (
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={handleToggleSelectionMode}
+                                                        className={`flex items-center gap-2 px-3 py-1 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800 transition-colors ${
+                                                            isSelectionModeActive 
+                                                            ? 'bg-blue-600 text-white hover:bg-blue-500' 
+                                                            : 'text-gray-700 dark:text-zinc-300 hover:bg-gray-300 dark:hover:bg-zinc-700'
+                                                        }`}
+                                                        aria-label="Toggle element selection mode"
+                                                        aria-pressed={isSelectionModeActive}
+                                                    >
+                                                        <CursorClickIcon aria-hidden="true" className="w-4 h-4" />
+                                                        Select
+                                                    </button>
+                                                    <DeviceSelector selectedDevice={previewDevice} onSelectDevice={setPreviewDevice} />
+                                                    <button 
+                                                        onClick={handleFullScreen} 
+                                                        className="flex items-center gap-2 px-3 py-1 text-sm font-medium text-gray-700 dark:text-zinc-300 hover:bg-gray-300 dark:hover:bg-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800"
+                                                        aria-label="Enter full screen preview"
+                                                    >
+                                                        <FullScreenIcon aria-hidden="true" className="w-4 h-4" />
+                                                        Full Screen
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div ref={previewContainerRef} className="flex-grow bg-white dark:bg-zinc-900 border-l border-gray-300 dark:border-zinc-700 relative">
+                                            {isLoading ? (
+                                                <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-zinc-900/50">
+                                                    <Spinner />
+                                                </div>
+                                            ) : null}
+                                            <div className={`w-full h-full transition-all duration-300 mx-auto ${previewDevice === 'mobile' ? 'max-w-sm' : ''} ${previewDevice === 'tablet' ? 'max-w-3xl' : ''}`}>
+                                                {activeTab === 'preview' && (
+                                                    <LivePreview files={currentFiles} isSelectionModeActive={isSelectionModeActive} />
+                                                )}
+                                                {activeTab === 'code' && (
+                                                    <CodeDisplay 
+                                                        files={currentFiles} 
+                                                        onFilesChange={handleFilesChange}
+                                                        onUndo={handleUndo}
+                                                        onRedo={handleRedo}
+                                                        canUndo={canUndo}
+                                                        canRedo={canRedo}
+                                                    />
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </main>
+                            </>
+                        ) : (
+                            <main className="flex-grow overflow-y-auto">
+                                <WelcomeScreen 
+                                    onCreateProject={handleCreateProject} 
+                                    isLoading={isLoading} 
+                                    logoUrl={LOGO_URL} 
+                                />
+                            </main>
+                        )}
                     </div>
-                </main>
+                </div>
             </div>
             {projectToDelete && (
                 <DeleteConfirmationModal

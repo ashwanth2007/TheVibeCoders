@@ -52,7 +52,7 @@ export const Header: React.FC<HeaderProps> = ({ projectName, onToggleSidebar, ac
     };
 
     const handleRenameSubmit = () => {
-        if (isRenaming) {
+        if (isRenaming && activeProjectId) {
             if (editingName.trim() && editingName.trim() !== projectName) {
                 onRenameProject(activeProjectId, editingName.trim());
             }
@@ -71,7 +71,9 @@ export const Header: React.FC<HeaderProps> = ({ projectName, onToggleSidebar, ac
 
     const handleClone = () => {
         setIsMenuOpen(false);
-        onCloneProject(activeProjectId);
+        if (activeProjectId) {
+            onCloneProject(activeProjectId);
+        }
     };
 
     const handleDelete = () => {

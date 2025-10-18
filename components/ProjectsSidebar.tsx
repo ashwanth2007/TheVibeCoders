@@ -16,9 +16,10 @@ interface ProjectsSidebarProps {
     onRenameProject: (id: string, newName: string) => void;
     onSetProjectToDelete: (project: Project | null) => void;
     onCloneProject: (id: string) => void;
+    onMouseLeave?: () => void;
 }
 
-export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({ isOpen, onClose, projects, activeProjectId, onSelectProject, onCreateNew, onRenameProject, onSetProjectToDelete, onCloneProject }) => {
+export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({ isOpen, onClose, projects, activeProjectId, onSelectProject, onCreateNew, onRenameProject, onSetProjectToDelete, onCloneProject, onMouseLeave }) => {
     const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -76,7 +77,7 @@ export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({ isOpen, onClos
     
     const handleMenuToggle = (e: React.MouseEvent, projectId: string) => {
         e.stopPropagation(); // Prevent project selection when clicking the menu
-        setOpenMenuId(prevId => (prevId === projectId ? null : projectId));
+        setOpenMenuId(prevId => (prevId === projectId ? null : prevId));
     };
 
     return (
@@ -88,6 +89,7 @@ export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({ isOpen, onClos
                 aria-hidden="true"
             />
             <aside 
+                onMouseLeave={onMouseLeave}
                 className={`
                     flex-shrink-0 flex flex-col bg-white dark:bg-zinc-800
                     transition-all duration-300 ease-in-out
