@@ -129,7 +129,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({ initialPrompt, isEditi
                     <button
                         onClick={handleGenerateClick}
                         disabled={isLoading || !prompt.trim()}
-                        className="w-full bg-gray-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-semibold py-3 px-4 rounded-lg hover:bg-gray-700 dark:hover:bg-zinc-300 disabled:opacity-60 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 dark:focus:ring-zinc-100"
+                        className="w-full flex items-center justify-center bg-gray-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-semibold py-3 px-4 rounded-lg hover:bg-gray-700 dark:hover:bg-zinc-300 disabled:opacity-60 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 dark:focus:ring-zinc-100"
                         aria-busy={isLoading}
                     >
                         {isLoading ? (
