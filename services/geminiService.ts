@@ -11,7 +11,7 @@ export interface File {
     content: string;
 }
 
-const MULTI_FILE_GENERATION_INSTRUCTION = `You are an expert web developer. Your task is to generate a complete web application project structure with multiple files based on the user's prompt, which may include an image for context. You must output a single JSON object containing an array of file objects.
+const MULTI_FILE_GENERATION_INSTRUCTION = `You are an expert web developer. Your task is to generate a complete web application project structure with multiple files based on the user's prompt. You must output a single JSON object containing an array of file objects.
 
 **Requirements:**
 1.  **JSON Output:** Your entire response MUST be a single, valid JSON object in the format: \`{ "files": [ { "path": "path/to/file.ext", "content": "file content" } ] }\`. Do not include any markdown formatting.
@@ -29,7 +29,7 @@ const MULTI_FILE_GENERATION_INSTRUCTION = `You are an expert web developer. Your
 6.  **File Paths:** Use forward slashes (/) for file paths.
 7.  **Completeness:** The generated files should be complete and ready to run. The user prompt should be implemented across these files.`;
 
-const EDITING_INSTRUCTION = `You are an expert web developer. Your task is to modify the provided web application files based on the user's request, which may include an image for context. You must output a single JSON object containing the complete, updated array of all project files.
+const EDITING_INSTRUCTION = `You are an expert web developer. Your task is to modify the provided web application files based on the user's request. You must output a single JSON object containing the complete, updated array of all project files.
 
 **Requirements:**
 1.  **JSON Output:** Your entire response MUST be a single, valid JSON object in the format: \`{ "files": [ { "path": "path/to/file.ext", "content": "file content" } ] }\`. Do not add any commentary or markdown formatting.
@@ -74,7 +74,7 @@ export const enhancePrompt = async (prompt: string): Promise<string> => {
     }
 };
 
-export const generateWebApp = async (prompt: string, baseFiles?: File[], image?: { base64: string; mimeType: string }): Promise<File[]> => {
+export const generateWebApp = async (prompt: string, baseFiles?: File[]): Promise<File[]> => {
     try {
         const isEditing = !!baseFiles && baseFiles.length > 0;
 
@@ -90,19 +90,7 @@ export const generateWebApp = async (prompt: string, baseFiles?: File[], image?:
         }
 
         const textPart = { text: textPrompt };
-        // FIX: Explicitly type the 'parts' array to allow a union of text and image parts,
-        // preventing a TypeScript error when adding the image part later.
-        const parts: ({ text: string } | { inlineData: { data: string; mimeType: string } })[] = [textPart];
-
-        if (image) {
-            const imagePart = {
-                inlineData: {
-                    data: image.base64,
-                    mimeType: image.mimeType,
-                },
-            };
-            parts.unshift(imagePart); // Put image first for model context
-        }
+        const parts = [textPart];
         
         const contents = { parts };
 

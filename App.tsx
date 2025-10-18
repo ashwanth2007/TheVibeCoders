@@ -10,6 +10,7 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { ProjectsSidebar } from './components/ProjectsSidebar';
 import { HistorySidebar } from './components/HistorySidebar';
 import { DeviceSelector, DeviceType } from './components/DeviceSelector';
+import { DeleteConfirmationModal } from './components/DeleteConfirmationModal';
 
 type ActiveTab = 'preview' | 'code';
 
@@ -29,15 +30,19 @@ export interface Project {
     };
 }
 
+const LOGO_URL = "https://styles.redditmedia.com/t5_2qh32/styles/communityIcon_4ke1237b6a841.png";
+
 const App: React.FC = () => {
     const [projects, setProjects] = useState<Project[]>([]);
     const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<ActiveTab>('preview');
-    const [isProjectsSidebarOpen, setProjectsSidebarOpen] = useState<boolean>(true);
+    const [isProjectsSidebarOpen, setProjectsSidebarOpen] = useState<boolean>(false);
     const [isHistorySidebarOpen, setHistorySidebarOpen] = useState<boolean>(false);
     const [previewDevice, setPreviewDevice] = useState<DeviceType>('current');
+    const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+
     
     const [isDragging, setIsDragging] = useState(false);
     const [leftPanelWidth, setLeftPanelWidth] = useState(33.33);
@@ -98,9 +103,14 @@ const App: React.FC = () => {
     useEffect(() => {
         if (projects.length > 0) {
             localStorage.setItem('projects', JSON.stringify(projects));
+        } else {
+            localStorage.removeItem('projects');
         }
+
         if (activeProjectId) {
             localStorage.setItem('activeProjectId', activeProjectId);
+        } else {
+            localStorage.removeItem('activeProjectId');
         }
     }, [projects, activeProjectId]);
     
@@ -124,7 +134,7 @@ const App: React.FC = () => {
             
             setProjects(prev => [...prev, newProject]);
             setActiveProjectId(newProject.id);
-            setProjectsSidebarOpen(true);
+            setProjectsSidebarOpen(false);
         } catch (e) {
             console.error(e);
             setError('Failed to generate the web app. Please check your API key and try again.');
@@ -133,7 +143,7 @@ const App: React.FC = () => {
         }
     }, []);
 
-    const handleGenerate = useCallback(async (prompt: string, image?: { base64: string; mimeType: string }) => {
+    const handleGenerate = useCallback(async (prompt: string) => {
         if (!prompt || isLoading || !activeProject) return;
 
         setIsLoading(true);
@@ -141,7 +151,7 @@ const App: React.FC = () => {
         setActiveTab('preview');
 
         try {
-            const files = await generateWebApp(prompt, isEditing ? currentFiles : undefined, image);
+            const files = await generateWebApp(prompt, isEditing ? currentFiles : undefined);
             const newEntry: HistoryEntry = { files, prompt, timestamp: Date.now() };
 
             setProjects(prevProjects => prevProjects.map(p => {
@@ -248,6 +258,62 @@ const App: React.FC = () => {
         setProjectsSidebarOpen(false);
     };
 
+    const handleRenameProject = useCallback((projectId: string, newName: string) => {
+        setProjects(prevProjects =>
+            prevProjects.map(p =>
+                p.id === projectId ? { ...p, name: newName } : p
+            )
+        );
+    }, []);
+
+    const handleDeleteProject = useCallback((projectId: string) => {
+        setProjects(prevProjects => {
+            const projectIndex = prevProjects.findIndex(p => p.id === projectId);
+            if (projectIndex === -1) return prevProjects;
+    
+            const newProjects = prevProjects.filter(p => p.id !== projectId);
+            
+            if (projectId === activeProjectId) {
+                if (newProjects.length > 0) {
+                    // Select the next item, or the last item if the deleted one was last
+                    const newActiveIndex = Math.min(projectIndex, newProjects.length - 1);
+                    setActiveProjectId(newProjects[newActiveIndex].id);
+                } else {
+                    setActiveProjectId(null);
+                }
+            }
+            
+            return newProjects;
+        });
+    }, [activeProjectId]);
+
+    const handleCloneProject = useCallback((projectId: string) => {
+        const projectToClone = projects.find(p => p.id === projectId);
+        if (!projectToClone) return;
+
+        const clonedProject: Project = {
+            ...JSON.parse(JSON.stringify(projectToClone)),
+            id: Date.now().toString(),
+            name: `${projectToClone.name} Copy`,
+        };
+
+        setProjects(prevProjects => {
+            const originalIndex = prevProjects.findIndex(p => p.id === projectId);
+            const newProjects = [...prevProjects];
+            newProjects.splice(originalIndex + 1, 0, clonedProject);
+            return newProjects;
+        });
+        
+        setActiveProjectId(clonedProject.id);
+    }, [projects]);
+
+    const handleDeleteConfirm = () => {
+        if (projectToDelete) {
+            handleDeleteProject(projectToDelete.id);
+            setProjectToDelete(null);
+        }
+    };
+
     const handleMouseDown = useCallback(() => setIsDragging(true), []);
     const handleMouseUp = useCallback(() => setIsDragging(false), []);
     const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -281,22 +347,28 @@ const App: React.FC = () => {
     }, [isDragging, handleMouseMove, handleMouseUp]);
 
     if (!activeProject && projects.length === 0) {
-        return <WelcomeScreen onCreateProject={handleCreateProject} isLoading={isLoading} />;
+        return <WelcomeScreen onCreateProject={handleCreateProject} isLoading={isLoading} logoUrl={LOGO_URL} />;
     }
     
     if (!activeProject && projects.length > 0) {
-        return <WelcomeScreen onCreateProject={handleCreateProject} isLoading={isLoading} />;
+        // This case handles the "Create New App" flow from the sidebar
+        return <WelcomeScreen onCreateProject={handleCreateProject} isLoading={isLoading} logoUrl={LOGO_URL} />;
     }
     
     if (!activeProject) {
+        // This case should ideally not be reached if there are projects, but is a safeguard.
         return <div className="flex items-center justify-center h-screen">Error: No active project selected.</div>;
     }
 
     return (
-        <div className="min-h-screen flex flex-col bg-gray-100 text-gray-900">
+        <div className="min-h-screen flex flex-col bg-gray-100 text-gray-900 dark:bg-zinc-900 dark:text-zinc-100">
             <Header 
                 projectName={activeProject.name}
                 onToggleSidebar={() => setProjectsSidebarOpen(prev => !prev)}
+                activeProjectId={activeProject.id}
+                onRenameProject={handleRenameProject}
+                onCloneProject={handleCloneProject}
+                onSetProjectToDelete={() => setProjectToDelete(activeProject)}
             />
             <div className="flex flex-grow overflow-hidden">
                 <ProjectsSidebar 
@@ -306,6 +378,9 @@ const App: React.FC = () => {
                     activeProjectId={activeProjectId}
                     onSelectProject={handleSelectProject}
                     onCreateNew={handleCreateNewApp}
+                    onRenameProject={handleRenameProject}
+                    onSetProjectToDelete={setProjectToDelete}
+                    onCloneProject={handleCloneProject}
                 />
                 <HistorySidebar
                     isOpen={isHistorySidebarOpen}
@@ -323,26 +398,26 @@ const App: React.FC = () => {
                             isLoading={isLoading}
                             onToggleHistory={() => setHistorySidebarOpen(prev => !prev)}
                         />
-                        {error && <div role="alert" className="text-red-600 bg-red-100 p-3 rounded-md">{error}</div>}
+                        {error && <div role="alert" className="text-red-600 bg-red-100 dark:text-red-400 dark:bg-red-900/30 p-3 rounded-md">{error}</div>}
                     </div>
                     
                     <div 
                         role="separator"
                         aria-orientation="vertical"
-                        className="w-1.5 bg-gray-300 cursor-col-resize hover:bg-gray-400 focus:bg-blue-500 focus:outline-none transition-colors"
+                        className="w-1.5 bg-gray-300 dark:bg-zinc-700 cursor-col-resize hover:bg-gray-400 dark:hover:bg-zinc-600 focus:bg-blue-500 dark:focus:bg-blue-400 focus:outline-none transition-colors"
                         onMouseDown={handleMouseDown}
                         tabIndex={0}
                         aria-label="Resize panels"
                     />
 
                     <div id="right-panel" className="flex flex-col flex-grow" style={{ width: `${100 - leftPanelWidth}%`}}>
-                        <div role="tablist" aria-label="Output view" className="flex justify-between items-center p-2 px-4 bg-gray-200 border-b border-l border-gray-300">
+                        <div role="tablist" aria-label="Output view" className="flex justify-between items-center p-2 px-4 bg-gray-200 dark:bg-zinc-800 border-b border-l border-gray-300 dark:border-zinc-700">
                             <div className="flex items-center gap-2">
                             <button 
                                     role="tab"
                                     aria-selected={activeTab === 'preview'}
                                     onClick={() => setActiveTab('preview')} 
-                                    className={`px-3 py-1 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 ${activeTab === 'preview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:bg-gray-300'}`}
+                                    className={`px-3 py-1 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800 ${activeTab === 'preview' ? 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 shadow-sm' : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700'}`}
                                 >
                                     <span aria-hidden="true" className="mr-1.5">•</span>
                                     Preview
@@ -351,7 +426,7 @@ const App: React.FC = () => {
                                     role="tab"
                                     aria-selected={activeTab === 'code'}
                                     onClick={() => setActiveTab('code')} 
-                                    className={`px-3 py-1 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 ${activeTab === 'code' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:bg-gray-300'}`}
+                                    className={`px-3 py-1 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800 ${activeTab === 'code' ? 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 shadow-sm' : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700'}`}
                             >
                                     Code
                             </button>
@@ -361,55 +436,48 @@ const App: React.FC = () => {
                                     <DeviceSelector selectedDevice={previewDevice} onSelectDevice={setPreviewDevice} />
                                     <button 
                                         onClick={handleFullScreen} 
-                                        className="flex items-center gap-2 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900"
+                                        className="flex items-center gap-2 px-3 py-1 text-sm font-medium text-gray-700 dark:text-zinc-300 hover:bg-gray-300 dark:hover:bg-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800"
                                         aria-label="Enter full screen preview"
                                     >
                                         <FullScreenIcon aria-hidden="true" className="w-4 h-4" />
-                                        Full screen
+                                        Full Screen
                                     </button>
                                 </div>
                             )}
                         </div>
-                        <div className="relative w-full h-full flex-grow border-l border-gray-300">
-                            {isLoading && (
-                                <div role="status" className="absolute inset-0 flex items-center justify-center bg-gray-100/80 backdrop-blur-sm z-20">
-                                <div className="text-center">
-                                        <Spinner />
-                                        <p className="mt-2 text-gray-700">{isEditing ? 'Applying changes...' : 'Generating your app...'}</p>
-                                        <p className="text-sm text-gray-600">This might take a moment.</p>
+                        <div ref={previewContainerRef} className="flex-grow bg-white dark:bg-zinc-900 border-l border-gray-300 dark:border-zinc-700 relative">
+                            {isLoading ? (
+                                <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-zinc-900/50">
+                                    <Spinner />
                                 </div>
-                                </div>
-                            )}
-                            <div className={`w-full h-full ${activeTab === 'preview' ? 'flex' : 'hidden'} items-center justify-center transition-colors duration-300 ${previewDevice !== 'current' ? 'bg-gray-400 p-4' : 'bg-white'}`}>
-                                <div 
-                                    ref={previewContainerRef} 
-                                    className="bg-white shadow-lg transition-all duration-300 ease-in-out"
-                                    style={{
-                                        width: previewDevice === 'current' ? '100%' : (previewDevice === 'mobile' ? '375px' : '768px'),
-                                        height: previewDevice === 'current' ? '100%' : (previewDevice === 'mobile' ? '667px' : '1024px'),
-                                        maxHeight: '100%',
-                                        overflow: 'hidden',
-                                        borderRadius: previewDevice !== 'current' ? '0.5rem' : '0',
-                                        border: previewDevice !== 'current' ? '1px solid #4a5568' : 'none',
-                                    }}
-                                >
+                            ) : null}
+                            <div className={`w-full h-full transition-all duration-300 mx-auto ${previewDevice === 'mobile' ? 'max-w-sm' : ''} ${previewDevice === 'tablet' ? 'max-w-3xl' : ''}`}>
+                                {activeTab === 'preview' && (
                                     <LivePreview files={currentFiles} />
-                                </div>
-                            </div>
-                            <div className={`w-full h-full ${activeTab === 'code' ? 'block' : 'hidden'}`}>
-                                <CodeDisplay 
-                                    files={currentFiles}
-                                    onFilesChange={handleFilesChange}
-                                    onUndo={handleUndo}
-                                    onRedo={handleRedo}
-                                    canUndo={canUndo}
-                                    canRedo={canRedo}
-                                />
+                                )}
+                                {activeTab === 'code' && (
+                                    <CodeDisplay 
+                                        files={currentFiles} 
+                                        onFilesChange={handleFilesChange}
+                                        onUndo={handleUndo}
+                                        onRedo={handleRedo}
+                                        canUndo={canUndo}
+                                        canRedo={canRedo}
+                                    />
+                                )}
                             </div>
                         </div>
                     </div>
                 </main>
             </div>
+            {projectToDelete && (
+                <DeleteConfirmationModal
+                    isOpen={!!projectToDelete}
+                    onClose={() => setProjectToDelete(null)}
+                    onConfirm={handleDeleteConfirm}
+                    projectName={projectToDelete.name}
+                />
+            )}
         </div>
     );
 };

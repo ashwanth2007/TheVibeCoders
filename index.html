@@ -4,7 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TheVibeCoders</title>
-    <link rel="icon" type="image/png" href="https://codingweek.org/wp-content/uploads/2023/09/code-6622549_1280-768x768.png" />
+    <link rel="icon" type="image/png" href="https://styles.redditmedia.com/t5_2qh32/styles/communityIcon_4ke1237b6a841.png" />
+    <script>
+        // This must be declared before the Tailwind CSS script to ensure it takes effect.
+        // It configures Tailwind to use a class-based dark mode instead of the default media query strategy.
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -44,7 +51,7 @@
 }
 </script>
 </head>
-<body class="bg-gray-100 text-gray-900">
+<body class="bg-gray-100 text-gray-900 dark:bg-zinc-900 dark:text-zinc-100">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
 </body>

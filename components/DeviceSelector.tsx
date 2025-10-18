@@ -42,7 +42,7 @@ export const DeviceSelector: React.FC<DeviceSelectorProps> = ({ selectedDevice, 
         <div ref={wrapperRef} className="relative">
             <button
                 onClick={() => setIsOpen(prev => !prev)}
-                className="flex items-center gap-2 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900"
+                className="flex items-center gap-2 px-3 py-1 text-sm font-medium text-gray-700 dark:text-zinc-300 hover:bg-gray-300 dark:hover:bg-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800"
                 aria-haspopup="true"
                 aria-expanded={isOpen}
                 aria-label="Select device for preview"
@@ -52,7 +52,7 @@ export const DeviceSelector: React.FC<DeviceSelectorProps> = ({ selectedDevice, 
             </button>
             {isOpen && (
                 <div 
-                    className="absolute right-0 mt-2 w-56 origin-top-right bg-gray-800 text-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-10 animate-fade-in"
+                    className="absolute right-0 mt-2 w-56 origin-top-right bg-white dark:bg-zinc-800 text-gray-900 dark:text-white rounded-md shadow-lg ring-1 ring-black dark:ring-white ring-opacity-5 dark:ring-opacity-10 focus:outline-none z-10 animate-fade-in"
                     role="menu"
                     aria-orientation="vertical"
                     aria-labelledby="menu-button"
@@ -62,7 +62,7 @@ export const DeviceSelector: React.FC<DeviceSelectorProps> = ({ selectedDevice, 
                             <button
                                 key={option.id}
                                 onClick={() => handleSelect(option.id)}
-                                className={`w-full flex items-center gap-3 px-4 py-2 text-sm text-left transition-colors ${selectedDevice === option.id ? 'bg-gray-700' : 'hover:bg-gray-600'}`}
+                                className={`w-full flex items-center gap-3 px-4 py-2 text-sm text-left transition-colors ${selectedDevice === option.id ? 'bg-gray-100 dark:bg-zinc-700' : 'hover:bg-gray-100 dark:hover:bg-zinc-600'}`}
                                 role="menuitem"
                             >
                                 <option.icon className="w-5 h-5" aria-hidden="true" />
