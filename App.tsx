@@ -1,19 +1,21 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+
 import { Header } from './components/Header';
 import { PromptInput } from './components/PromptInput';
 import { CodeDisplay } from './components/CodeDisplay';
 import { LivePreview } from './components/LivePreview';
-// FIX: Import `generateSuggestions` to correctly fetch improvement suggestions.
 import { generateWebApp, File, Suggestion, generateSuggestions } from './services/geminiService';
 import { Spinner } from './components/Spinner';
 import { FullScreenIcon } from './components/icons/FullScreenIcon';
-import { WelcomeScreen } from './components/WelcomeScreen';
+import { WelcomeScreen, WizardPrefillData } from './components/WelcomeScreen';
 import { ProjectsSidebar } from './components/ProjectsSidebar';
 import { HistorySidebar } from './components/HistorySidebar';
 import { DeviceSelector, DeviceType } from './components/DeviceSelector';
 import { DeleteConfirmationModal } from './components/DeleteConfirmationModal';
 import { MenuIcon } from './components/icons/MenuIcon';
 import { CursorClickIcon } from './components/icons/CursorClickIcon';
+import { LoadingOverlay } from './components/LoadingOverlay';
+import { ProjectWizard } from './components/ProjectWizard';
 
 type ActiveTab = 'preview' | 'code';
 type SelectedElement = { selector: string; html: string };
@@ -37,7 +39,15 @@ export interface Project {
 const LOGO_URL = "https://styles.redditmedia.com/t5_2qh32/styles/communityIcon_4ke1237b6a841.png";
 
 const App: React.FC = () => {
-    const [projects, setProjects] = useState<Project[]>([]);
+    const [projects, setProjects] = useState<Project[]>(() => {
+        try {
+            const localData = localStorage.getItem('thevibeCodersProjects');
+            return localData ? JSON.parse(localData) : [];
+        } catch (error) {
+            console.error("Could not parse projects from localStorage", error);
+            return [];
+        }
+    });
     const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
@@ -52,6 +62,7 @@ const App: React.FC = () => {
     const [isSelectionModeActive, setIsSelectionModeActive] = useState<boolean>(false);
     const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
 
+    const [wizardData, setWizardData] = useState<{ name: string; prompt: string; prefill?: WizardPrefillData } | null>(null);
     
     const [isDragging, setIsDragging] = useState(false);
     const [leftPanelWidth, setLeftPanelWidth] = useState(33.33);
@@ -66,63 +77,15 @@ const App: React.FC = () => {
     const isEditing = !!currentFiles && currentFiles.length > 0;
     const canUndo = (activeProject?.codeHistory.currentIndex ?? 0) > 0;
     const canRedo = activeProject ? activeProject.codeHistory.currentIndex < activeProject.codeHistory.history.length - 1 : false;
-
+    
     useEffect(() => {
         try {
-            const savedProjects = localStorage.getItem('projects');
-            const savedActiveId = localStorage.getItem('activeProjectId');
-            if (savedProjects) {
-                const parsedProjects: any[] = JSON.parse(savedProjects);
-                
-                // Migration logic for old project structure
-                const migratedProjects = parsedProjects.map((p): Project => {
-                    if (p.codeHistory && p.codeHistory.history.length > 0) {
-                        const firstEntry = p.codeHistory.history[0];
-                        // Check if the first entry is an array of files (old format)
-                        if (Array.isArray(firstEntry)) {
-                            const newHistory: HistoryEntry[] = (p.codeHistory.history as File[][]).map((files, index) => ({
-                                files: files,
-                                prompt: index === 0 ? p.initialPrompt : `Legacy Version ${index + 1}`,
-                                timestamp: Date.now() - (p.codeHistory.history.length - index) * 60000 // Fake timestamps
-                            }));
-                             // Handle case where old format had an empty initial state
-                            if (newHistory.length > 0 && newHistory[0].files.length === 0) {
-                                newHistory.shift();
-                                p.codeHistory.currentIndex--;
-                            }
-                            return { ...p, codeHistory: { ...p.codeHistory, history: newHistory } };
-                        }
-                    }
-                    return p as Project;
-                });
-
-                setProjects(migratedProjects);
-
-                if (savedActiveId && migratedProjects.some(p => p.id === savedActiveId)) {
-                    setActiveProjectId(savedActiveId);
-                } else if (migratedProjects.length > 0) {
-                     // Default to new project screen if there are projects but none are active
-                    setActiveProjectId(null);
-                }
-            }
-        } catch (e) {
-            console.error("Failed to parse or migrate projects from localStorage", e);
+            localStorage.setItem('thevibeCodersProjects', JSON.stringify(projects));
+        } catch (error) {
+            console.error("Could not save projects to localStorage", error);
         }
-    }, []);
+    }, [projects]);
 
-    useEffect(() => {
-        if (projects.length > 0) {
-            localStorage.setItem('projects', JSON.stringify(projects));
-        } else {
-            localStorage.removeItem('projects');
-        }
-
-        if (activeProjectId) {
-            localStorage.setItem('activeProjectId', activeProjectId);
-        } else {
-            localStorage.removeItem('activeProjectId');
-        }
-    }, [projects, activeProjectId]);
 
     useEffect(() => {
         const fetchSuggestions = async () => {
@@ -130,9 +93,6 @@ const App: React.FC = () => {
                 setIsGeneratingSuggestions(true);
                 setSuggestions([]); // Clear old suggestions
                 try {
-                    // FIX: Use `generateSuggestions` instead of `generateWebApp`.
-                    // `generateWebApp` expects a string prompt and returns files, while `generateSuggestions`
-                    // correctly takes the current files and returns an array of suggestions.
                     const newSuggestions = await generateSuggestions(currentFiles);
                     setSuggestions(newSuggestions);
                 } catch (e) {
@@ -146,15 +106,14 @@ const App: React.FC = () => {
         };
     
         fetchSuggestions();
-    }, [activeProject, activeProject?.codeHistory.currentIndex]); // Re-run when active code changes
+    }, [activeProject, activeProject?.codeHistory.currentIndex]);
     
-    // Listen for messages from the iframe (for element selection)
     useEffect(() => {
         const handleMessage = (event: MessageEvent) => {
             if (event.data && event.data.type === 'elementSelected') {
                 const { selector, html } = event.data.payload;
                 setSelectedElement({ selector, html });
-                setIsSelectionModeActive(false); // Turn off selection mode after an element is chosen
+                setIsSelectionModeActive(false); 
             }
         };
 
@@ -168,39 +127,45 @@ const App: React.FC = () => {
         setIsSelectionModeActive(prev => {
             const newMode = !prev;
             if (!newMode) {
-                // If we are turning the mode off manually, clear any selection
                 setSelectedElement(null);
             }
             return newMode;
         });
     };
     
-    const handleCreateProject = useCallback(async (name: string, initialPrompt: string) => {
+    const handleStartWizard = (name: string, prompt: string, prefill?: WizardPrefillData) => {
+        setWizardData({ name, prompt, prefill });
+    };
+
+    const handleCancelWizard = () => {
+        setWizardData(null);
+    };
+    
+    const handleCreateProject = useCallback(async (name: string, finalPrompt: string) => {
         setIsLoading(true);
         setError(null);
         setActiveTab('preview');
         
-        const newProject: Project = {
-            id: Date.now().toString(),
-            name,
-            initialPrompt,
-            codeHistory: { history: [], currentIndex: -1 },
-        };
-
         try {
-            const files = await generateWebApp(initialPrompt);
-            const newEntry: HistoryEntry = { files, prompt: initialPrompt, timestamp: Date.now() };
-            newProject.codeHistory.history.push(newEntry);
-            newProject.codeHistory.currentIndex = 0;
+            const files = await generateWebApp(finalPrompt);
+            const newEntry: HistoryEntry = { files, prompt: finalPrompt, timestamp: Date.now() };
             
+            const newProject: Project = {
+                id: Date.now().toString() + Math.random().toString(36).substring(2),
+                name,
+                initialPrompt: finalPrompt,
+                codeHistory: { history: [newEntry], currentIndex: 0 },
+            };
+
             setProjects(prev => [...prev, newProject]);
             setActiveProjectId(newProject.id);
-            setProjectsSidebarOpen(false); // Close sidebar after creation
+            setProjectsSidebarOpen(false);
         } catch (e) {
             console.error(e);
             setError('Failed to generate the web app. Please check your API key and try again.');
         } finally {
             setIsLoading(false);
+            setWizardData(null);
         }
     }, []);
 
@@ -212,7 +177,6 @@ const App: React.FC = () => {
         setActiveTab('preview');
         
         let finalPrompt = prompt;
-        // Prepend context to the prompt if an element is selected
         if (selectedElement) {
             finalPrompt = `The user has selected a specific element on the page to modify.
 - CSS Selector: \`${selectedElement.selector}\`
@@ -224,23 +188,20 @@ With this context, apply the following change: "${prompt}"`;
 
         try {
             const files = await generateWebApp(finalPrompt, isEditing ? currentFiles : undefined);
-            const newEntry: HistoryEntry = { files, prompt: prompt, timestamp: Date.now() }; // Store original prompt in history
+            const newEntry: HistoryEntry = { files, prompt: prompt, timestamp: Date.now() };
 
-            setProjects(prevProjects => prevProjects.map(p => {
-                if (p.id === activeProject.id) {
-                    const newHistory = p.codeHistory.history.slice(0, p.codeHistory.currentIndex + 1);
-                    newHistory.push(newEntry);
-                    return {
-                        ...p,
-                        codeHistory: {
-                            history: newHistory,
-                            currentIndex: newHistory.length - 1,
-                        }
-                    };
-                }
-                return p;
-            }));
-             setSelectedElement(null); // Clear selection after successful generation
+            const updatedProject = { ...activeProject };
+            const newHistory = updatedProject.codeHistory.history.slice(0, updatedProject.codeHistory.currentIndex + 1);
+            newHistory.push(newEntry);
+            updatedProject.codeHistory = {
+                history: newHistory,
+                currentIndex: newHistory.length - 1,
+            };
+
+            setProjects(prevProjects => prevProjects.map(p => 
+                p.id === updatedProject.id ? updatedProject : p
+            ));
+             setSelectedElement(null);
         } catch (e) {
             console.error(e);
             setError('Failed to generate the web app. Please check your API key and try again.');
@@ -251,25 +212,20 @@ With this context, apply the following change: "${prompt}"`;
 
     const handleFilesChange = useCallback((newFiles: File[]) => {
         if (!activeProject) return;
-        setProjects(prevProjects => prevProjects.map(p => {
-            if (p.id === activeProject.id) {
-                const newHistory = p.codeHistory.history.slice(0, p.codeHistory.currentIndex + 1);
-                const newEntry: HistoryEntry = {
-                    files: newFiles,
-                    prompt: "Manual code edit",
-                    timestamp: Date.now()
-                };
-                newHistory.push(newEntry);
-                return {
-                    ...p,
-                    codeHistory: {
-                        history: newHistory,
-                        currentIndex: newHistory.length - 1,
-                    }
-                };
-            }
-            return p;
-        }));
+        
+        const updatedProject = { ...activeProject };
+        const newHistory = updatedProject.codeHistory.history.slice(0, updatedProject.codeHistory.currentIndex + 1);
+        const newEntry: HistoryEntry = {
+            files: newFiles,
+            prompt: "Manual code edit",
+            timestamp: Date.now()
+        };
+        newHistory.push(newEntry);
+        updatedProject.codeHistory = {
+            history: newHistory,
+            currentIndex: newHistory.length - 1,
+        };
+        setProjects(prevProjects => prevProjects.map(p => p.id === updatedProject.id ? updatedProject : p));
     }, [activeProject]);
 
     const handleRestoreVersion = useCallback((indexToRestore: number) => {
@@ -283,49 +239,46 @@ With this context, apply the following change: "${prompt}"`;
             prompt: `Restored from version created at ${new Date(versionToRestore.timestamp).toLocaleTimeString()}`,
             timestamp: Date.now()
         };
+        
+        const updatedProject = { ...activeProject };
+        const newHistory = updatedProject.codeHistory.history.slice(0, updatedProject.codeHistory.currentIndex + 1);
+        newHistory.push(newEntry);
+        updatedProject.codeHistory = {
+            history: newHistory,
+            currentIndex: newHistory.length - 1,
+        };
 
-        setProjects(prevProjects => prevProjects.map(p => {
-            if (p.id === activeProject.id) {
-                const newHistory = p.codeHistory.history.slice(0, p.codeHistory.currentIndex + 1);
-                newHistory.push(newEntry);
-                return {
-                    ...p,
-                    codeHistory: {
-                        history: newHistory,
-                        currentIndex: newHistory.length - 1,
-                    }
-                };
-            }
-            return p;
-        }));
-        setHistorySidebarOpen(false); // Close sidebar after restoring
+        setProjects(prevProjects => prevProjects.map(p => p.id === updatedProject.id ? updatedProject : p));
+        setHistorySidebarOpen(false);
     }, [activeProject]);
+    
+    const updateCurrentIndex = (newIndex: number) => {
+        if (!activeProject) return;
+        const updatedProject = { 
+            ...activeProject, 
+            codeHistory: { ...activeProject.codeHistory, currentIndex: newIndex }
+        };
+        setProjects(prevProjects => prevProjects.map(p => p.id === updatedProject.id ? updatedProject : p));
+    };
 
     const handleUndo = useCallback(() => {
         if (canUndo && activeProject) {
-            setProjects(prevProjects => prevProjects.map(p => 
-                p.id === activeProject.id
-                ? { ...p, codeHistory: { ...p.codeHistory, currentIndex: p.codeHistory.currentIndex - 1 } }
-                : p
-            ));
+            updateCurrentIndex(activeProject.codeHistory.currentIndex - 1);
         }
     }, [canUndo, activeProject]);
 
     const handleRedo = useCallback(() => {
         if (canRedo && activeProject) {
-            setProjects(prevProjects => prevProjects.map(p => 
-                p.id === activeProject.id
-                ? { ...p, codeHistory: { ...p.codeHistory, currentIndex: p.codeHistory.currentIndex + 1 } }
-                : p
-            ));
+            updateCurrentIndex(activeProject.codeHistory.currentIndex + 1);
         }
     }, [canRedo, activeProject]);
 
+
     const handleSelectProject = (projectId: string) => {
         setActiveProjectId(projectId);
-        setProjectsSidebarOpen(false); // Close on mobile after selection
+        setProjectsSidebarOpen(false);
         setSidebarHovered(false);
-        setSelectedElement(null); // Clear element selection when changing project
+        setSelectedElement(null);
         setIsSelectionModeActive(false);
     };
 
@@ -334,43 +287,39 @@ With this context, apply the following change: "${prompt}"`;
         setProjectsSidebarOpen(true);
     };
 
-    const handleRenameProject = useCallback((projectId: string, newName: string) => {
+    const handleRenameProject = useCallback(async (projectId: string, newName: string) => {
+        const projectToUpdate = projects.find(p => p.id === projectId);
+        if (!projectToUpdate) return;
+
+        const updatedProject = { ...projectToUpdate, name: newName };
         setProjects(prevProjects =>
             prevProjects.map(p =>
-                p.id === projectId ? { ...p, name: newName } : p
+                p.id === projectId ? updatedProject : p
             )
         );
-    }, []);
+    }, [projects]);
 
-    const handleDeleteProject = useCallback((projectId: string) => {
+    const handleDeleteProject = useCallback(async (projectId: string) => {
         setProjects(prevProjects => {
             const newProjects = prevProjects.filter(p => p.id !== projectId);
-            
             if (projectId === activeProjectId) {
-                setActiveProjectId(null); // Go to new project screen
+                setActiveProjectId(null);
             }
-            
             return newProjects;
         });
     }, [activeProjectId]);
 
-    const handleCloneProject = useCallback((projectId: string) => {
+    const handleCloneProject = useCallback(async (projectId: string) => {
         const projectToClone = projects.find(p => p.id === projectId);
         if (!projectToClone) return;
 
         const clonedProject: Project = {
             ...JSON.parse(JSON.stringify(projectToClone)),
-            id: Date.now().toString(),
+            id: Date.now().toString() + Math.random().toString(36).substring(2),
             name: `${projectToClone.name} Copy`,
         };
-
-        setProjects(prevProjects => {
-            const originalIndex = prevProjects.findIndex(p => p.id === projectId);
-            const newProjects = [...prevProjects];
-            newProjects.splice(originalIndex + 1, 0, clonedProject);
-            return newProjects;
-        });
         
+        setProjects(prevProjects => [...prevProjects, clonedProject]);
         setActiveProjectId(clonedProject.id);
     }, [projects]);
 
@@ -385,7 +334,7 @@ With this context, apply the following change: "${prompt}"`;
         const willBeOpen = !isProjectsSidebarOpen;
         setProjectsSidebarOpen(willBeOpen);
         if (willBeOpen) {
-            setSidebarHovered(false); // If we pin it open, disable hover state
+            setSidebarHovered(false);
         }
     }, [isProjectsSidebarOpen]);
 
@@ -421,8 +370,20 @@ With this context, apply the following change: "${prompt}"`;
         };
     }, [isDragging, handleMouseMove, handleMouseUp]);
 
+    if (wizardData) {
+        return (
+            <ProjectWizard
+                initialData={wizardData}
+                onCreateProject={handleCreateProject}
+                onCancel={handleCancelWizard}
+                isLoading={isLoading}
+                logoUrl={LOGO_URL}
+            />
+        );
+    }
+    
     if (projects.length === 0) {
-        return <WelcomeScreen onCreateProject={handleCreateProject} isLoading={isLoading} logoUrl={LOGO_URL} isStandalone />;
+        return <WelcomeScreen onFormSubmit={handleStartWizard} isLoading={isLoading} logoUrl={LOGO_URL} isStandalone />;
     }
     
     const isSidebarEffectivelyOpen = isProjectsSidebarOpen || isSidebarHovered;
@@ -434,7 +395,7 @@ With this context, apply the following change: "${prompt}"`;
                     isOpen={isSidebarEffectivelyOpen}
                     onClose={() => setProjectsSidebarOpen(false)}
                     onMouseLeave={() => {
-                        if (!isProjectsSidebarOpen) { // Only close on leave if it's not pinned open
+                        if (!isProjectsSidebarOpen) {
                             setSidebarHovered(false);
                         }
                     }}
@@ -458,7 +419,7 @@ With this context, apply the following change: "${prompt}"`;
                             onSetProjectToDelete={() => setProjectToDelete(activeProject)}
                         />
                     )}
-
+                    
                     <div className="relative flex-grow flex flex-row overflow-hidden">
                          {!isProjectsSidebarOpen &&
                             <div
@@ -590,7 +551,7 @@ With this context, apply the following change: "${prompt}"`;
                         ) : (
                             <main className="flex-grow overflow-y-auto">
                                 <WelcomeScreen 
-                                    onCreateProject={handleCreateProject} 
+                                    onFormSubmit={handleStartWizard} 
                                     isLoading={isLoading} 
                                     logoUrl={LOGO_URL} 
                                 />
