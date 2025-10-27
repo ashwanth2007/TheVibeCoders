@@ -15,7 +15,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link id="google-font-stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&display=swap" rel="stylesheet">
+    <link id="google-font-stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Source+Code+Pro:wght@400&display=swap" rel="stylesheet">
     <style>
         body {
             font-family: 'Bricolage Grotesque', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
@@ -38,6 +38,85 @@
             white-space: nowrap;
             border-width: 0;
         }
+        /* Syntax Highlighting Styles (VS Code Dark+ theme inspired) */
+        .token-comment { color: #6A9955; }
+        .token-punctuation { color: #d4d4d4; }
+        .token-tag, .token-selector { color: #569cd6; }
+        .token-attr-name, .token-property { color: #9cdcfe; }
+        .token-attr-value, .token-string, .token-value { color: #ce9178; }
+        .token-keyword { color: #c586c0; font-style: italic; }
+        .token-function { color: #dcdcaa; }
+        .token-number { color: #b5cea8; }
+
+        /* Code Editor styles */
+        .code-editor-wrapper {
+            position: relative;
+            height: 100%;
+            overflow: hidden;
+            display: flex;
+            background-color: #1e1e1e;
+        }
+        .line-numbers {
+            padding: 1rem;
+            font-family: 'Source Code Pro', monospace;
+            font-size: 0.875rem; /* 14px */
+            line-height: 1.5rem; /* 24px */
+            color: #858585;
+            text-align: right;
+            user-select: none;
+            border-right: 1px solid #333;
+            /* Match the background of the main editor for seamless look */
+            background-color: #1e1e1e;
+            overflow: hidden; /* Prevent its own scrollbar */
+        }
+        .line-numbers span {
+            display: block;
+            min-width: 2ch; /* Ensure space for double-digit numbers */
+        }
+        .code-editor-main {
+            position: relative;
+            flex-grow: 1;
+            height: 100%;
+            font-family: 'Source Code Pro', monospace;
+            font-size: 0.875rem;
+            line-height: 1.5rem;
+            overflow: hidden; /* Hide scrollbar, textarea will handle it */
+        }
+        .code-editor-main pre,
+        .code-editor-main textarea {
+            padding: 1rem;
+            margin: 0 !important; /* Override any potential user-agent styles */
+            white-space: pre;
+            overflow-wrap: normal;
+            font: inherit !important;
+            line-height: inherit !important;
+            letter-spacing: inherit !important;
+            -moz-tab-size: 4;
+            tab-size: 4;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+        }
+        .code-editor-main pre {
+            z-index: 1;
+            pointer-events: none; /* Let clicks go through to textarea */
+             overflow: hidden;
+        }
+        .code-editor-main textarea {
+            z-index: 2;
+            border: none;
+            outline: none;
+            resize: none;
+            background: transparent;
+            color: transparent;
+            caret-color: white;
+            overflow: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #555 #1e1e1e;
+        }
     </style>
 <script type="importmap">
 {
@@ -47,6 +126,7 @@
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.25.0",
     "jszip": "https://esm.sh/jszip@3.10.1",
+    "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.44.4",
     "firebase/": "https://aistudiocdn.com/firebase@^12.4.0/"
   }
 }

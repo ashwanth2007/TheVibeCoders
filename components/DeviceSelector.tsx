@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { DeviceIcon } from './icons/DeviceIcon';
 import { DesktopIcon } from './icons/DesktopIcon';
 import { MobileIcon } from './icons/MobileIcon';
 import { TabletIcon } from './icons/TabletIcon';
@@ -12,9 +11,9 @@ interface DeviceSelectorProps {
 }
 
 const deviceOptions: { id: DeviceType; label: string; icon: React.FC<React.SVGProps<SVGSVGElement>> }[] = [
-    { id: 'current', label: 'Current screen size', icon: DesktopIcon },
-    { id: 'mobile', label: 'Mobile', icon: MobileIcon },
-    { id: 'tablet', label: 'Tablet', icon: TabletIcon },
+    { id: 'current', label: 'Responsive', icon: DesktopIcon },
+    { id: 'mobile', label: 'Mobile (375px)', icon: MobileIcon },
+    { id: 'tablet', label: 'Tablet (768px)', icon: TabletIcon },
 ];
 
 export const DeviceSelector: React.FC<DeviceSelectorProps> = ({ selectedDevice, onSelectDevice }) => {
@@ -38,17 +37,20 @@ export const DeviceSelector: React.FC<DeviceSelectorProps> = ({ selectedDevice, 
         setIsOpen(false);
     };
 
+    const selectedOption = deviceOptions.find(option => option.id === selectedDevice) || deviceOptions[0];
+    const SelectedIcon = selectedOption.icon;
+
     return (
         <div ref={wrapperRef} className="relative">
             <button
                 onClick={() => setIsOpen(prev => !prev)}
-                className="flex items-center gap-2 px-3 py-1 text-sm font-medium text-gray-700 dark:text-zinc-300 hover:bg-gray-300 dark:hover:bg-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-900 dark:focus:ring-zinc-100 dark:focus:ring-offset-zinc-800"
+                className="p-1.5 text-gray-500 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-zinc-100 rounded-md hover:bg-gray-300 dark:hover:bg-zinc-700"
                 aria-haspopup="true"
                 aria-expanded={isOpen}
                 aria-label="Select device for preview"
+                title={`Preview device: ${selectedOption.label}`}
             >
-                <DeviceIcon aria-hidden="true" className="w-4 h-4" />
-                Device
+                <SelectedIcon aria-hidden="true" className="w-4 h-4" />
             </button>
             {isOpen && (
                 <div 

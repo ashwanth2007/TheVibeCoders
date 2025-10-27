@@ -4,6 +4,8 @@ import { MoreVerticalIcon } from './icons/MoreVerticalIcon';
 import { PencilIcon } from './icons/PencilIcon';
 import { CopyIcon } from './icons/CopyIcon';
 import { TrashIcon } from './icons/TrashIcon';
+import { UserIcon } from './icons/UserIcon';
+import { supabase } from '../services/supabaseClient';
 
 interface HeaderProps {
     projectName: string;
@@ -12,6 +14,7 @@ interface HeaderProps {
     onRenameProject: (id: string, newName: string) => void;
     onCloneProject: (id: string) => void;
     onSetProjectToDelete?: () => void;
+    userEmail?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,17 +24,23 @@ export const Header: React.FC<HeaderProps> = ({
     onRenameProject,
     onCloneProject,
     onSetProjectToDelete,
+    userEmail
 }) => {
     const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
+    const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isRenaming, setIsRenaming] = useState(false);
     const [editingName, setEditingName] = useState(projectName);
     const projectMenuRef = useRef<HTMLDivElement>(null);
+    const userMenuRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (projectMenuRef.current && !projectMenuRef.current.contains(event.target as Node)) {
                 setIsProjectMenuOpen(false);
+            }
+            if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+                setIsUserMenuOpen(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -85,6 +94,10 @@ export const Header: React.FC<HeaderProps> = ({
     const handleDelete = () => {
         setIsProjectMenuOpen(false);
         onSetProjectToDelete?.();
+    };
+    
+    const handleSignOut = async () => {
+        await supabase.auth.signOut();
     };
 
     return (
@@ -154,7 +167,34 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             
             <div className="flex-1 flex justify-end">
-                {/* User menu removed */}
+                 <div className="relative" ref={userMenuRef}>
+                    <button
+                        onClick={() => setIsUserMenuOpen(prev => !prev)}
+                        className="flex items-center gap-2 p-2 rounded-md hover:bg-gray-200 dark:hover:bg-zinc-700"
+                        aria-label="User menu"
+                        aria-haspopup="true"
+                        aria-expanded={isUserMenuOpen}
+                    >
+                        <UserIcon className="w-5 h-5 text-gray-700 dark:text-zinc-300" />
+                    </button>
+                    {isUserMenuOpen && (
+                        <div
+                            className="absolute right-0 top-full mt-2 w-64 origin-top-right bg-white dark:bg-zinc-800 rounded-md shadow-lg ring-1 ring-black dark:ring-white ring-opacity-5 dark:ring-opacity-10 focus:outline-none z-20 animate-fade-in py-1"
+                            role="menu"
+                            aria-orientation="vertical"
+                        >
+                            <div className="px-4 py-2 border-b border-gray-200 dark:border-zinc-700">
+                                <p className="text-sm text-gray-600 dark:text-zinc-400">Signed in as</p>
+                                <p className="text-sm font-medium text-gray-900 dark:text-zinc-100 truncate">{userEmail}</p>
+                            </div>
+                            <div className="p-1">
+                                <button onClick={handleSignOut} className="w-full text-left text-sm text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 rounded-md px-3 py-2" role="menuitem">
+                                    Sign Out
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                 </div>
             </div>
         </header>
     );

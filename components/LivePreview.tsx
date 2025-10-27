@@ -1,9 +1,13 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { File } from '../services/geminiService';
 
 interface LivePreviewProps {
     files: File[];
     isSelectionModeActive: boolean;
+}
+
+export interface LivePreviewHandle {
+    reload: () => void;
 }
 
 const createBlobUrl = (htmlContent: string): string => {
@@ -116,8 +120,15 @@ const elementSelectorScript = `
 </script>
 `;
 
-export const LivePreview: React.FC<LivePreviewProps> = ({ files, isSelectionModeActive }) => {
+export const LivePreview = forwardRef<LivePreviewHandle, LivePreviewProps>(({ files, isSelectionModeActive }, ref) => {
     const [activePath, setActivePath] = useState('index.html');
+    const iframeRef = useRef<HTMLIFrameElement>(null);
+
+    useImperativeHandle(ref, () => ({
+        reload: () => {
+            iframeRef.current?.contentWindow?.location.reload();
+        }
+    }));
 
     // Reset to index.html when files change (e.g., new generation or project switch)
     useEffect(() => {
@@ -276,6 +287,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ files, isSelectionMode
                 </div>
             ) : (
                 <iframe
+                    ref={iframeRef}
                     key={blobUrl} // Re-mount iframe when blobUrl changes, ensuring scripts re-run
                     src={blobUrl}
                     title="Live Preview"
@@ -285,4 +297,4 @@ export const LivePreview: React.FC<LivePreviewProps> = ({ files, isSelectionMode
             )}
         </div>
     );
-};
+});

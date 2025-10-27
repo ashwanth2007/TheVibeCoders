@@ -77,7 +77,7 @@ export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({ isOpen, onClos
     
     const handleMenuToggle = (e: React.MouseEvent, projectId: string) => {
         e.stopPropagation(); // Prevent project selection when clicking the menu
-        setOpenMenuId(prevId => (prevId === projectId ? null : prevId));
+        setOpenMenuId(prevId => (prevId === projectId ? null : projectId));
     };
 
     return (
