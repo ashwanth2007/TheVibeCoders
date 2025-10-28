@@ -6,6 +6,8 @@ import { CopyIcon } from './icons/CopyIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { UserIcon } from './icons/UserIcon';
 import { supabase } from '../services/supabaseClient';
+import { SettingsIcon } from './icons/SettingsIcon';
+import { LogOutIcon } from './icons/LogOutIcon';
 
 interface HeaderProps {
     projectName: string;
@@ -14,6 +16,7 @@ interface HeaderProps {
     onRenameProject: (id: string, newName: string) => void;
     onCloneProject: (id: string) => void;
     onSetProjectToDelete?: () => void;
+    onOpenSettings: () => void;
     userEmail?: string;
 }
 
@@ -24,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
     onRenameProject,
     onCloneProject,
     onSetProjectToDelete,
+    onOpenSettings,
     userEmail
 }) => {
     const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
@@ -170,7 +174,7 @@ export const Header: React.FC<HeaderProps> = ({
                  <div className="relative" ref={userMenuRef}>
                     <button
                         onClick={() => setIsUserMenuOpen(prev => !prev)}
-                        className="flex items-center gap-2 p-2 rounded-md hover:bg-gray-200 dark:hover:bg-zinc-700"
+                        className="flex items-center gap-2 p-2 rounded-full hover:bg-gray-200 dark:hover:bg-zinc-700"
                         aria-label="User menu"
                         aria-haspopup="true"
                         aria-expanded={isUserMenuOpen}
@@ -188,8 +192,14 @@ export const Header: React.FC<HeaderProps> = ({
                                 <p className="text-sm font-medium text-gray-900 dark:text-zinc-100 truncate">{userEmail}</p>
                             </div>
                             <div className="p-1">
-                                <button onClick={handleSignOut} className="w-full text-left text-sm text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 rounded-md px-3 py-2" role="menuitem">
-                                    Sign Out
+                                <button onClick={() => { onOpenSettings(); setIsUserMenuOpen(false); }} className="w-full text-left text-sm text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 rounded-md px-3 py-2 flex items-center gap-3" role="menuitem">
+                                    <SettingsIcon className="w-4 h-4" />
+                                    <span>Settings</span>
+                                </button>
+                                <div className="my-1 h-px bg-gray-200 dark:bg-zinc-700" />
+                                <button onClick={handleSignOut} className="w-full text-left text-sm text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 rounded-md px-3 py-2 flex items-center gap-3" role="menuitem">
+                                    <LogOutIcon className="w-4 h-4" />
+                                    <span>Sign Out</span>
                                 </button>
                             </div>
                         </div>

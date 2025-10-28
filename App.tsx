@@ -5,7 +5,7 @@ import { Header } from './components/Header';
 import { PromptInput } from './components/PromptInput';
 import { CodeDisplay } from './components/CodeDisplay';
 import { LivePreview, LivePreviewHandle } from './components/LivePreview';
-import { generateWebApp, File, Suggestion, generateSuggestions, discussCode, GenerationResult } from './services/geminiService';
+import { generateWebApp, File, Suggestion, generateSuggestions, discussCode, GenerationResult, initializeAi } from './services/geminiService';
 import { FullScreenIcon } from './components/icons/FullScreenIcon';
 import { WelcomeScreen, WizardPrefillData } from './components/WelcomeScreen';
 import { ProjectsSidebar } from './components/ProjectsSidebar';
@@ -22,6 +22,7 @@ import { supabase } from './services/supabaseClient';
 import { AuthScreen } from './components/AuthScreen';
 import { AlertTriangleIcon } from './components/icons/AlertTriangleIcon';
 import { XIcon } from './components/icons/XIcon';
+import { SettingsModal } from './components/SettingsModal';
 
 type ActiveTab = 'preview' | 'code';
 type SelectedElement = { selector: string; html: string };
@@ -76,6 +77,10 @@ const App: React.FC = () => {
     const [aiTargetFiles, setAiTargetFiles] = useState<File[] | undefined>(undefined);
     const [wizardData, setWizardData] = useState<{ name: string; prompt: string; prefill?: WizardPrefillData } | null>(null);
     
+    const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+    const [isApiKeyRequired, setIsApiKeyRequired] = useState(false);
+    const [isSavingApiKey, setIsSavingApiKey] = useState(false);
+    
     const [isDragging, setIsDragging] = useState(false);
     const [leftPanelWidth, setLeftPanelWidth] = useState(25);
     const mainRef = useRef<HTMLDivElement>(null);
@@ -89,11 +94,20 @@ const App: React.FC = () => {
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
-            setIsLoading(false); // Initial session check is done
+            const metadata = session?.user?.user_metadata;
+            const apiKey = metadata?.gemini_api_key;
+            initializeAi(apiKey);
+            if (session && !metadata?.has_seen_api_key_prompt) {
+                setIsSettingsModalOpen(true);
+                setIsApiKeyRequired(false); // It's skippable on first login
+            }
+            setIsLoading(false);
         });
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
+            const apiKey = session?.user?.user_metadata?.gemini_api_key;
+            initializeAi(apiKey);
         });
 
         return () => subscription.unsubscribe();
@@ -141,7 +155,7 @@ const App: React.FC = () => {
         };
 
         fetchProjects();
-    }, [session]);
+    }, [session, activeProjectId]);
 
 
     const activeProject = useMemo(() => {
@@ -155,7 +169,7 @@ const App: React.FC = () => {
     
     useEffect(() => {
         const fetchSuggestions = async () => {
-            if (activeProject && currentFiles.length > 0) {
+            if (activeProject && currentFiles.length > 0 && session?.user?.user_metadata?.gemini_api_key) {
                 setIsGeneratingSuggestions(true);
                 setSuggestions([]);
                 try {
@@ -172,7 +186,7 @@ const App: React.FC = () => {
         };
     
         fetchSuggestions();
-    }, [activeProject, activeProject?.codeHistory.currentIndex]);
+    }, [activeProject, activeProject?.codeHistory.currentIndex, session]);
     
     useEffect(() => {
         const handleMessage = (event: MessageEvent) => {
@@ -195,8 +209,18 @@ const App: React.FC = () => {
 
     const handleCancelWizard = () => setWizardData(null);
     
+    const checkApiKey = (): boolean => {
+        const apiKey = session?.user?.user_metadata?.gemini_api_key;
+        if (!apiKey) {
+            setIsApiKeyRequired(true);
+            setIsSettingsModalOpen(true);
+            return false;
+        }
+        return true;
+    };
+
     const handleCreateProject = useCallback(async (name: string, finalPrompt: string) => {
-        if (!session) return;
+        if (!session || !checkApiKey()) return;
         setIsLoading(true);
         setError(null);
         setActiveTab('preview');
@@ -301,6 +325,8 @@ const App: React.FC = () => {
 
     const handleGenerate = useCallback(async (prompt: string, attachments: globalThis.File[] = []) => {
         if (generationStatus.stage !== 'idle' || !prompt || !activeProject) return;
+        if (!checkApiKey()) return;
+
         setError(null);
 
         if (isDiscussModeActive) {
@@ -316,9 +342,9 @@ const App: React.FC = () => {
 
                 setProjects(prevProjects => prevProjects.map(p => p.id === updatedProject.id ? updatedProject : p));
                 await updateProjectInDb(updatedProject);
-            } catch (e) {
+            } catch (e: any) {
                 console.error(e);
-                setError('Failed to get a response. Please try again.');
+                setError(`Failed to get a response: ${e.message}`);
             } finally {
                 setGenerationStatus({ stage: 'idle', message: '', timer: 0 });
             }
@@ -326,6 +352,8 @@ const App: React.FC = () => {
         }
         
         const timerInterval = setInterval(() => setGenerationStatus(prev => ({ ...prev, timer: prev.timer + 1 })), 1000);
+        timerIntervalRef.current = window.setInterval(() => setGenerationStatus(prev => ({ ...prev, timer: prev.timer + 1 })), 1000);
+
 
         try {
             setGenerationStatus({ stage: 'thinking', message: 'Thinking...', timer: 0 });
@@ -340,7 +368,7 @@ With this context, apply the following change: "${prompt}"`;
             }
 
             const result: GenerationResult = await generateWebApp(finalPrompt, isEditing ? currentFiles : undefined, attachments);
-            clearInterval(timerInterval);
+            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
             
             setGenerationStatus(prev => ({
                 ...prev,
@@ -359,11 +387,11 @@ With this context, apply the following change: "${prompt}"`;
         } catch (e: any) {
             console.error(e);
             setError(`Failed to generate: ${e.message}`);
-            clearInterval(timerInterval);
+            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
             setGenerationStatus({ stage: 'idle', message: '', timer: 0 });
             setAiTargetFiles(undefined);
         }
-    }, [generationStatus.stage, activeProject, currentFiles, isEditing, selectedElement, isDiscussModeActive]);
+    }, [generationStatus.stage, activeProject, currentFiles, isEditing, selectedElement, isDiscussModeActive, session]);
 
     const handleFilesChange = useCallback(async (newFiles: File[]) => {
         if (!activeProject) return;
@@ -537,6 +565,37 @@ With this context, apply the following change: "${prompt}"`;
         };
     }, [isDragging, onDrag, stopDragging]);
 
+    const handleSaveApiKey = async (apiKey: string) => {
+        if (!session) return;
+        setIsSavingApiKey(true);
+        
+        const { error } = await supabase.auth.updateUser({
+            data: { 
+                gemini_api_key: apiKey,
+                has_seen_api_key_prompt: true 
+            }
+        });
+    
+        if (error) {
+            setError(`Failed to save API key: ${error.message}`);
+        } else {
+            setIsSettingsModalOpen(false);
+            // The onAuthStateChange listener will automatically update the session and re-initialize the AI client
+        }
+        setIsSavingApiKey(false);
+    };
+
+    const handleCloseSettingsModal = async (skipped: boolean) => {
+        setIsSettingsModalOpen(false);
+        // If the user explicitly skips the initial prompt, mark it as seen.
+        if (skipped && session && !session.user.user_metadata.has_seen_api_key_prompt) {
+            await supabase.auth.updateUser({
+                data: { has_seen_api_key_prompt: true }
+            });
+             // onAuthStateChange will trigger session update.
+        }
+    };
+
 
     if (isLoading && !session) {
         return <LoadingOverlay isVisible={true} />;
@@ -546,14 +605,31 @@ With this context, apply the following change: "${prompt}"`;
         return <AuthScreen logoUrl={LOGO_URL} />;
     }
     
+    // Abstracted Modal rendering
+    const renderSettingsModal = () => (
+        <SettingsModal
+            isOpen={isSettingsModalOpen}
+            onClose={handleCloseSettingsModal}
+            onSave={handleSaveApiKey}
+            currentApiKey={session?.user?.user_metadata?.gemini_api_key || null}
+            isSkippable={!isApiKeyRequired}
+            isLoading={isSavingApiKey}
+        />
+    );
+
     if (wizardData) {
-        return <ProjectWizard 
-            initialData={wizardData}
-            onCreateProject={handleCreateProject}
-            onCancel={handleCancelWizard}
-            isLoading={generationStatus.stage !== 'idle'}
-            logoUrl={LOGO_URL}
-        />;
+        return (
+            <>
+                {renderSettingsModal()}
+                <ProjectWizard 
+                    initialData={wizardData}
+                    onCreateProject={handleCreateProject}
+                    onCancel={handleCancelWizard}
+                    isLoading={generationStatus.stage !== 'idle'}
+                    logoUrl={LOGO_URL}
+                />
+            </>
+        );
     }
 
     if (!activeProjectId && projects.length === 0 && isLoading) {
@@ -561,12 +637,18 @@ With this context, apply the following change: "${prompt}"`;
     }
 
     if (!activeProjectId) {
-        return <WelcomeScreen 
-            onFormSubmit={handleStartWizard} 
-            isLoading={generationStatus.stage !== 'idle'} 
-            logoUrl={LOGO_URL} 
-            isStandalone={true}
-        />;
+        return (
+            <>
+                {renderSettingsModal()}
+                <WelcomeScreen 
+                    onFormSubmit={handleStartWizard} 
+                    isLoading={generationStatus.stage !== 'idle'} 
+                    logoUrl={LOGO_URL} 
+                    isStandalone={true}
+                    onOpenSettings={() => { setIsApiKeyRequired(false); setIsSettingsModalOpen(true); }}
+                />
+            </>
+        );
     }
 
     if (!activeProject) {
@@ -575,6 +657,7 @@ With this context, apply the following change: "${prompt}"`;
 
     return (
         <div className="flex h-screen flex-col bg-gray-100 dark:bg-zinc-900 overflow-hidden relative">
+            {renderSettingsModal()}
             <Header
                 projectName={activeProject.name || 'New Project'}
                 onToggleSidebar={() => setProjectsSidebarOpen(prev => !prev)}
@@ -582,6 +665,7 @@ With this context, apply the following change: "${prompt}"`;
                 onRenameProject={handleRenameProject}
                 onCloneProject={handleCloneProject}
                 onSetProjectToDelete={() => setProjectToDelete(activeProject)}
+                onOpenSettings={() => { setIsApiKeyRequired(false); setIsSettingsModalOpen(true); }}
                 userEmail={session.user.email}
             />
             <main className="flex flex-grow overflow-hidden relative">

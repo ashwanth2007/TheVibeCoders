@@ -1,10 +1,21 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-}
+let ai: GoogleGenAI | null = null;
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const initializeAi = (apiKey: string | undefined | null) => {
+    if (apiKey) {
+        try {
+            // Re-initialize the client with the new key
+            ai = new GoogleGenAI({ apiKey });
+        } catch (e) {
+            console.error("Failed to initialize GoogleGenAI with provided key:", e);
+            ai = null; // Set to null if initialization fails
+        }
+    } else {
+        // Clear the client if no key is provided
+        ai = null;
+    }
+};
 
 export interface File {
     path: string;
@@ -156,6 +167,9 @@ const processFile = async (file: globalThis.File): Promise<{ imagePart?: any; te
 };
 
 const describeImage = async (imagePart: any): Promise<string> => {
+    if (!ai) {
+        throw new Error("Gemini API Key not configured. Please add it in Settings.");
+    }
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
@@ -175,6 +189,9 @@ const describeImage = async (imagePart: any): Promise<string> => {
 
 
 export const enhancePrompt = async (prompt: string): Promise<string> => {
+    if (!ai) {
+        throw new Error("Gemini API Key not configured. Please add it in Settings.");
+    }
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
@@ -191,6 +208,9 @@ export const enhancePrompt = async (prompt: string): Promise<string> => {
 };
 
 export const generateWebApp = async (prompt: string, baseFiles?: File[], attachments: globalThis.File[] = []): Promise<GenerationResult> => {
+    if (!ai) {
+        throw new Error("Gemini API Key not configured. Please add it in Settings.");
+    }
     try {
         const isEditing = !!baseFiles && baseFiles.length > 0;
         let modelName: string;
@@ -291,6 +311,11 @@ export const generateWebApp = async (prompt: string, baseFiles?: File[], attachm
 };
 
 export const generateSuggestions = async (files: File[]): Promise<Suggestion[]> => {
+    if (!ai) {
+        // Silently fail for suggestions, as it's a non-critical feature.
+        console.log("Skipping suggestions: Gemini API Key not configured.");
+        return [];
+    }
     try {
         const textPrompt = `Here is the current project structure as a JSON object:\n\n${JSON.stringify({ files }, null, 2)}\n\nPlease provide 5 improvement suggestions based on this code.`;
         
@@ -314,11 +339,15 @@ export const generateSuggestions = async (files: File[]): Promise<Suggestion[]> 
         throw new Error("Invalid JSON structure for suggestions received from AI.");
     } catch (error) {
         console.error("Error generating suggestions:", error);
-        throw new Error("Failed to communicate with the AI model for suggestions.");
+        // Return empty array on failure to not break the UI
+        return [];
     }
 };
 
 export const discussCode = async (prompt: string, files: File[]): Promise<string> => {
+    if (!ai) {
+        throw new Error("Gemini API Key not configured. Please add it in Settings.");
+    }
     try {
         const textPrompt = `Here is the current project structure as a JSON object:\n\n${JSON.stringify({ files }, null, 2)}\n\nHere is my question: ${prompt}`;
         

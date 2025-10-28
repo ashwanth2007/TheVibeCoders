@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Spinner } from './Spinner';
 import { LoadingOverlay } from './LoadingOverlay';
+import { SettingsIcon } from './icons/SettingsIcon';
 
 export interface WizardPrefillData {
     backgroundColor: string;
@@ -20,6 +21,7 @@ interface WelcomeScreenProps {
     isLoading: boolean;
     logoUrl: string;
     isStandalone?: boolean;
+    onOpenSettings: () => void;
 }
 
 const categorizedPrompts: { [key: string]: ExampleProject[] } = {
@@ -130,7 +132,7 @@ const categorizedPrompts: { [key: string]: ExampleProject[] } = {
     ],
 };
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onFormSubmit, isLoading, logoUrl, isStandalone = false }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onFormSubmit, isLoading, logoUrl, isStandalone = false, onOpenSettings }) => {
     const [appName, setAppName] = useState('');
     const [appPrompt, setAppPrompt] = useState('');
     const [selectedExample, setSelectedExample] = useState<ExampleProject | null>(null);
@@ -164,6 +166,18 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onFormSubmit, isLo
                 ? 'min-h-screen flex items-center justify-center px-4 py-12' 
                 : 'h-full flex items-center justify-center p-4'
             }`}>
+                 {isStandalone && (
+                    <div className="absolute top-6 right-6">
+                        <button 
+                            onClick={onOpenSettings} 
+                            className="p-2 rounded-full text-gray-600 dark:text-zinc-300 hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors" 
+                            aria-label="Open settings"
+                            title="Settings"
+                        >
+                            <SettingsIcon className="w-6 h-6" />
+                        </button>
+                    </div>
+                )}
                 <div className={`w-full max-w-3xl mx-auto ${isStandalone ? '' : 'p-4 lg:p-8'}`}>
                     <div className="text-center mb-8">
                         <img src={logoUrl} alt="TheVibeCoders Logo" className="w-16 h-16 rounded-2xl mb-4 inline-block" />
