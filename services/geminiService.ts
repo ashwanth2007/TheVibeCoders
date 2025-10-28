@@ -32,6 +32,20 @@ export interface GenerationResult {
     files: File[];
 }
 
+const handleGeminiError = (error: any, context: string): Error => {
+    console.error(`Error in ${context}:`, error);
+    // Make error checking more robust by looking at the message property if it exists.
+    const errorString = (error?.message || error.toString()).toLowerCase();
+
+    // Broaden the check for API key-related errors to provide better user feedback.
+    if (errorString.includes("api key") || errorString.includes("api_key") || errorString.includes("permission denied") || errorString.includes("authentication failed")) {
+        return new Error("Your Gemini API Key is invalid, missing required permissions, or not entered correctly. Please check it in Settings and try again.");
+    }
+    
+    // Provide a more helpful generic error message.
+    return new Error(`Failed to communicate with the AI model for ${context}. This could be a temporary network issue or a problem with the service.`);
+};
+
 const MULTI_FILE_GENERATION_INSTRUCTION = `You are an expert web developer. Your task is to generate a complete web application project structure with multiple files based on the user's prompt. You must output a single JSON object containing a "plan" string and an array of file objects.
 
 **Requirements:**
@@ -181,8 +195,12 @@ const describeImage = async (imagePart: any): Promise<string> => {
             }
         });
         return response.text.trim();
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error describing image:", error);
+        const errorString = error.toString();
+        if (errorString.includes("API key not valid") || errorString.includes("permission denied") || errorString.includes("API_KEY_INVALID")) {
+            return "Could not get an AI description: Invalid API Key.";
+        }
         return "Could not get an AI description for this image.";
     }
 };
@@ -202,8 +220,7 @@ export const enhancePrompt = async (prompt: string): Promise<string> => {
         });
         return response.text.trim();
     } catch (error) {
-        console.error("Error enhancing prompt:", error);
-        throw new Error("Failed to communicate with the AI model for prompt enhancement.");
+        throw handleGeminiError(error, "prompt enhancement");
     }
 };
 
@@ -305,8 +322,7 @@ export const generateWebApp = async (prompt: string, baseFiles?: File[], attachm
         throw new Error("Invalid JSON structure received from AI.");
 
     } catch (error) {
-        console.error("Error generating web app:", error);
-        throw new Error("Failed to communicate with the AI model.");
+        throw handleGeminiError(error, "web app generation");
     }
 };
 
@@ -361,7 +377,6 @@ export const discussCode = async (prompt: string, files: File[]): Promise<string
 
         return response.text.trim();
     } catch (error) {
-        console.error("Error in discussion:", error);
-        throw new Error("Failed to communicate with the AI model for discussion.");
+        throw handleGeminiError(error, "discussion");
     }
 };
