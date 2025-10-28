@@ -80,6 +80,7 @@ const App: React.FC = () => {
     const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
     const [isApiKeyRequired, setIsApiKeyRequired] = useState(false);
     const [isSavingApiKey, setIsSavingApiKey] = useState(false);
+    const [pendingAction, setPendingAction] = useState<(() => Promise<void>) | null>(null);
     
     const [isDragging, setIsDragging] = useState(false);
     const [leftPanelWidth, setLeftPanelWidth] = useState(25);
@@ -155,7 +156,7 @@ const App: React.FC = () => {
         };
 
         fetchProjects();
-    }, [session, activeProjectId]);
+    }, [session]);
 
 
     const activeProject = useMemo(() => {
@@ -203,65 +204,86 @@ const App: React.FC = () => {
         };
     }, []);
 
+    // Effect to trigger a pending action after the API key has been successfully saved and the session has been updated.
+    useEffect(() => {
+        if (pendingAction && session?.user?.user_metadata?.gemini_api_key) {
+            const runAction = async () => {
+                setIsSettingsModalOpen(false);
+                await pendingAction();
+                setPendingAction(null);
+            }
+            runAction();
+        }
+    }, [session, pendingAction]);
+
+
     const handleToggleSelectionMode = () => setIsSelectionModeActive(prev => !prev);
     
     const handleStartWizard = (name: string, prompt: string, prefill?: WizardPrefillData) => setWizardData({ name, prompt, prefill });
 
     const handleCancelWizard = () => setWizardData(null);
     
-    const checkApiKey = (): boolean => {
+    const checkApiKey = useCallback((action: () => Promise<void>): boolean => {
         const apiKey = session?.user?.user_metadata?.gemini_api_key;
         if (!apiKey) {
             setIsApiKeyRequired(true);
+            setPendingAction(() => action); // Store the action
             setIsSettingsModalOpen(true);
             return false;
         }
         return true;
-    };
+    }, [session]);
 
     const handleCreateProject = useCallback(async (name: string, finalPrompt: string) => {
-        if (!session || !checkApiKey()) return;
-        setIsLoading(true);
-        setError(null);
-        setActiveTab('preview');
+        if (!session) return;
+
+        const action = async () => {
+            setIsLoading(true);
+            setError(null);
+            setActiveTab('preview');
+            
+            try {
+                const result = await generateWebApp(finalPrompt);
+                const newEntry: HistoryEntry = { files: result.files, prompt: finalPrompt, timestamp: Date.now() };
+                
+                const newProjectData = {
+                    name,
+                    initial_prompt: finalPrompt,
+                    code_history: { history: [newEntry], currentIndex: 0 },
+                    discussion_history: [],
+                    user_id: session.user.id
+                };
+
+                const { data, error } = await supabase.from('projects').insert(newProjectData).select().single();
+
+                if (error) throw error;
+                
+                const newProject: Project = {
+                    id: data.id,
+                    name: data.name,
+                    initialPrompt: data.initial_prompt,
+                    codeHistory: data.code_history,
+                    discussionHistory: data.discussion_history,
+                    userId: data.user_id,
+                    createdAt: data.created_at,
+                };
+
+                setProjects(prev => [newProject, ...prev]);
+                setActiveProjectId(newProject.id);
+                setProjectsSidebarOpen(false);
+            } catch (e: any) {
+                console.error(e);
+                setError(`Failed to create project: ${e.message}`);
+            } finally {
+                setIsLoading(false);
+                setWizardData(null);
+            }
+        };
         
-        try {
-            const result = await generateWebApp(finalPrompt);
-            const newEntry: HistoryEntry = { files: result.files, prompt: finalPrompt, timestamp: Date.now() };
-            
-            const newProjectData = {
-                name,
-                initial_prompt: finalPrompt,
-                code_history: { history: [newEntry], currentIndex: 0 },
-                discussion_history: [],
-                user_id: session.user.id
-            };
-
-            const { data, error } = await supabase.from('projects').insert(newProjectData).select().single();
-
-            if (error) throw error;
-            
-            const newProject: Project = {
-                id: data.id,
-                name: data.name,
-                initialPrompt: data.initial_prompt,
-                codeHistory: data.code_history,
-                discussionHistory: data.discussion_history,
-                userId: data.user_id,
-                createdAt: data.created_at,
-            };
-
-            setProjects(prev => [newProject, ...prev]);
-            setActiveProjectId(newProject.id);
-            setProjectsSidebarOpen(false);
-        } catch (e: any) {
-            console.error(e);
-            setError(`Failed to create project: ${e.message}`);
-        } finally {
-            setIsLoading(false);
-            setWizardData(null);
+        if (checkApiKey(action)) {
+            await action();
         }
-    }, [session]);
+    }, [session, checkApiKey]);
     
     const updateProjectInDb = async (project: Project) => {
         const { id, ...updateData } = project;
@@ -325,73 +347,77 @@ const App: React.FC = () => {
 
     const handleGenerate = useCallback(async (prompt: string, attachments: globalThis.File[] = []) => {
         if (generationStatus.stage !== 'idle' || !prompt || !activeProject) return;
-        if (!checkApiKey()) return;
 
-        setError(null);
+        const action = async () => {
+            setError(null);
 
-        if (isDiscussModeActive) {
-            setGenerationStatus({ stage: 'thinking', message: 'Thinking...', timer: 0 });
-            try {
-                const answer = await discussCode(prompt, currentFiles);
-                const userMessage = { role: 'user' as const, content: prompt };
-                const modelMessage = { role: 'model' as const, content: answer };
+            if (isDiscussModeActive) {
+                setGenerationStatus({ stage: 'thinking', message: 'Thinking...', timer: 0 });
+                try {
+                    const answer = await discussCode(prompt, currentFiles);
+                    const userMessage = { role: 'user' as const, content: prompt };
+                    const modelMessage = { role: 'model' as const, content: answer };
 
-                const updatedProject = { ...activeProject };
-                const newDiscussionHistory = [...(updatedProject.discussionHistory || []), userMessage, modelMessage];
-                updatedProject.discussionHistory = newDiscussionHistory;
+                    const updatedProject = { ...activeProject };
+                    const newDiscussionHistory = [...(updatedProject.discussionHistory || []), userMessage, modelMessage];
+                    updatedProject.discussionHistory = newDiscussionHistory;
 
-                setProjects(prevProjects => prevProjects.map(p => p.id === updatedProject.id ? updatedProject : p));
-                await updateProjectInDb(updatedProject);
-            } catch (e: any) {
-                console.error(e);
-                setError(`Failed to get a response: ${e.message}`);
-            } finally {
-                setGenerationStatus({ stage: 'idle', message: '', timer: 0 });
+                    setProjects(prevProjects => prevProjects.map(p => p.id === updatedProject.id ? updatedProject : p));
+                    await updateProjectInDb(updatedProject);
+                } catch (e: any) {
+                    console.error(e);
+                    setError(`Failed to get a response: ${e.message}`);
+                } finally {
+                    setGenerationStatus({ stage: 'idle', message: '', timer: 0 });
+                }
+                return;
             }
-            return;
-        }
-        
-        const timerInterval = setInterval(() => setGenerationStatus(prev => ({ ...prev, timer: prev.timer + 1 })), 1000);
-        timerIntervalRef.current = window.setInterval(() => setGenerationStatus(prev => ({ ...prev, timer: prev.timer + 1 })), 1000);
+            
+            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = window.setInterval(() => setGenerationStatus(prev => ({ ...prev, timer: prev.timer + 1 })), 1000);
 
+            try {
+                setGenerationStatus({ stage: 'thinking', message: 'Thinking...', timer: 0 });
 
-        try {
-            setGenerationStatus({ stage: 'thinking', message: 'Thinking...', timer: 0 });
-
-            let finalPrompt = prompt;
-            if (selectedElement) {
-                finalPrompt = `The user has selected a specific element on the page to modify.
+                let finalPrompt = prompt;
+                if (selectedElement) {
+                    finalPrompt = `The user has selected a specific element on the page to modify.
 - CSS Selector: \`${selectedElement.selector}\`
 - Element HTML: \`\`\`html\n${selectedElement.html}\n\`\`\`
 
 With this context, apply the following change: "${prompt}"`;
+                }
+
+                const result: GenerationResult = await generateWebApp(finalPrompt, isEditing ? currentFiles : undefined, attachments);
+                if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+                
+                setGenerationStatus(prev => ({
+                    ...prev,
+                    stage: 'editing',
+                    message: 'Preparing to edit files...',
+                    plan: result.plan,
+                    timer: prev.timer,
+                    filesBeingEdited: { current: 0, total: result.files.length }
+                }));
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                setActiveTab('code');
+                setAiTargetFiles(result.files);
+
+            } catch (e: any) {
+                console.error(e);
+                setError(`Failed to generate: ${e.message}`);
+                if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+                setGenerationStatus({ stage: 'idle', message: '', timer: 0 });
+                setAiTargetFiles(undefined);
             }
+        };
 
-            const result: GenerationResult = await generateWebApp(finalPrompt, isEditing ? currentFiles : undefined, attachments);
-            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-            
-            setGenerationStatus(prev => ({
-                ...prev,
-                stage: 'editing',
-                message: 'Preparing to edit files...',
-                plan: result.plan,
-                timer: prev.timer,
-                filesBeingEdited: { current: 0, total: result.files.length }
-            }));
-            
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            setActiveTab('code');
-            setAiTargetFiles(result.files);
-
-        } catch (e: any) {
-            console.error(e);
-            setError(`Failed to generate: ${e.message}`);
-            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-            setGenerationStatus({ stage: 'idle', message: '', timer: 0 });
-            setAiTargetFiles(undefined);
+        if (checkApiKey(action)) {
+            await action();
         }
-    }, [generationStatus.stage, activeProject, currentFiles, isEditing, selectedElement, isDiscussModeActive, session]);
+    }, [generationStatus.stage, activeProject, currentFiles, isEditing, selectedElement, isDiscussModeActive, checkApiKey]);
 
     const handleFilesChange = useCallback(async (newFiles: File[]) => {
         if (!activeProject) return;
@@ -578,15 +604,17 @@ With this context, apply the following change: "${prompt}"`;
     
         if (error) {
             setError(`Failed to save API key: ${error.message}`);
-        } else {
-            setIsSettingsModalOpen(false);
-            // The onAuthStateChange listener will automatically update the session and re-initialize the AI client
+            // If save fails, clear pending action so user isn't stuck
+            setPendingAction(null);
         }
+        // On success, the onAuthStateChange listener and the useEffect for pendingAction will handle the next steps.
         setIsSavingApiKey(false);
     };
 
     const handleCloseSettingsModal = async (skipped: boolean) => {
         setIsSettingsModalOpen(false);
+        // If the user closes the modal, any pending action should be cancelled.
+        setPendingAction(null);
         // If the user explicitly skips the initial prompt, mark it as seen.
         if (skipped && session && !session.user.user_metadata.has_seen_api_key_prompt) {
             await supabase.auth.updateUser({
@@ -625,7 +653,7 @@ With this context, apply the following change: "${prompt}"`;
                     initialData={wizardData}
                     onCreateProject={handleCreateProject}
                     onCancel={handleCancelWizard}
-                    isLoading={generationStatus.stage !== 'idle'}
+                    isLoading={generationStatus.stage !== 'idle' || isLoading}
                     logoUrl={LOGO_URL}
                 />
             </>
