@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import JSZip from 'jszip';
 import { ClipboardIcon } from './icons/ClipboardIcon';
 import { CheckIcon } from './icons/CheckIcon';
@@ -7,8 +8,19 @@ import { RedoIcon } from './icons/RedoIcon';
 import { ExportIcon } from './icons/ExportIcon';
 import { File } from '../services/geminiService';
 import { FileCodeIcon } from './icons/FileCodeIcon';
-import { SyntaxHighlighter } from './SyntaxHighlighter';
+import { Editor } from './Editor';
+import { PlusIcon } from './icons/PlusIcon';
+import { SaveIcon } from './icons/SaveIcon';
+import { FolderIcon } from './icons/FolderIcon';
+import { FolderOpenIcon } from './icons/FolderOpenIcon';
+import { ChevronDownIcon } from './icons/ChevronDownIcon';
+import { MoreVerticalIcon } from './icons/MoreVerticalIcon';
+import { PencilIcon } from './icons/PencilIcon';
+import { TrashIcon } from './icons/TrashIcon';
+import { XIcon } from './icons/XIcon';
+import { SearchIcon } from './icons/SearchIcon';
 
+// --- TYPES ---
 interface CodeDisplayProps {
     files: File[];
     onFilesChange: (newFiles: File[]) => void;
@@ -18,115 +30,209 @@ interface CodeDisplayProps {
     canRedo: boolean;
     aiTargetFiles?: File[];
     onAnimationStart?: (path: string, index: number, total: number) => void;
-    onAnimationComplete?: () => void;
+    // FIX: Updated the onAnimationComplete prop to expect the animated files as an argument.
+    onAnimationComplete?: (files: File[]) => void;
 }
 
-export const CodeDisplay: React.FC<CodeDisplayProps> = ({ 
-    files, 
-    onFilesChange, 
-    onUndo, 
-    onRedo, 
-    canUndo, 
-    canRedo,
-    aiTargetFiles,
-    onAnimationStart,
-    onAnimationComplete 
-}) => {
-    const [localFiles, setLocalFiles] = useState<File[]>(files);
-    const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
-    const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
-    const [saveStatus, setSaveStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved');
-    const animationFrameRef = useRef<number>();
+type TreeNode = {
+    name: string;
+    path: string;
+    type: 'file' | 'folder';
+    children?: TreeNode[];
+};
 
-    const lineNumbersRef = useRef<HTMLDivElement>(null);
-    const preRef = useRef<HTMLPreElement>(null);
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
+// --- UTILITY FUNCTIONS ---
+const getLanguageFromPath = (path: string): string => {
+    const extension = path.split('.').pop()?.toLowerCase() || '';
+    switch (extension) {
+        case 'js': case 'jsx': return 'javascript';
+        case 'ts': case 'tsx': return 'typescript';
+        case 'css': return 'css';
+        case 'html': return 'html';
+        case 'json': return 'json';
+        case 'md': return 'markdown';
+        default: return 'plaintext';
+    }
+};
 
+const buildFileTree = (files: File[]): TreeNode[] => {
+    const root: { [key: string]: TreeNode } = {};
 
-    useEffect(() => {
-        setLocalFiles(files);
-        if (activeFilePath && !files.some(f => f.path === activeFilePath)) {
-            setActiveFilePath(files.length > 0 ? files[0].path : null);
-        } else if (!activeFilePath && files.length > 0) {
-            setActiveFilePath(files.find(f => f.path === 'index.html')?.path || files[0].path);
+    files.forEach(file => {
+        const parts = file.path.split('/');
+        let currentLevel = root;
+
+        parts.forEach((part, index) => {
+            if (!currentLevel[part]) {
+                const isFile = index === parts.length - 1;
+                const path = parts.slice(0, index + 1).join('/');
+                currentLevel[part] = {
+                    name: part,
+                    path: path,
+                    type: isFile ? 'file' : 'folder',
+                    ...(isFile ? {} : { children: [] })
+                };
+                if (!isFile) {
+                    (currentLevel[part] as any)._childrenDict = {};
+                }
+            }
+            if (index < parts.length - 1) {
+                currentLevel = (currentLevel[part] as any)._childrenDict;
+            }
+        });
+    });
+
+    const unflatten = (node: any): TreeNode => {
+        if (node._childrenDict) {
+            node.children = Object.values(node._childrenDict).map(unflatten).sort((a: any, b: any) => {
+                if (a.type === b.type) return a.name.localeCompare(b.name);
+                return a.type === 'folder' ? -1 : 1;
+            });
+            delete node._childrenDict;
         }
+        return node;
+    };
+
+    return Object.values(root).map(unflatten).sort((a, b) => {
+        if (a.type === b.type) return a.name.localeCompare(b.name);
+        return a.type === 'folder' ? -1 : 1;
+    });
+};
+
+// --- MAIN COMPONENT ---
+export const CodeDisplay: React.FC<CodeDisplayProps> = (props) => {
+    const { files, onFilesChange, onUndo, onRedo, canUndo, canRedo, aiTargetFiles, onAnimationStart, onAnimationComplete } = props;
+
+    const [openFilePaths, setOpenFilePaths] = useState<string[]>([]);
+    const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+    const [saveStatus, setSaveStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved');
+    
+    const editorContentRef = useRef<{ [path: string]: string }>({});
+    const animationFrameRef = useRef<number>();
+    
+    // --- State Syncing ---
+    useEffect(() => {
+        const fileMap = new Map(files.map(f => [f.path, f.content]));
+        editorContentRef.current = Object.fromEntries(fileMap);
+        
+        // If active file was deleted, close it
+        if (activeFilePath && !fileMap.has(activeFilePath)) {
+            handleCloseTab(activeFilePath, true);
+        }
+        // If open tabs were deleted, close them
+        setOpenFilePaths(prev => prev.filter(path => fileMap.has(path)));
+        
     }, [files]);
     
     useEffect(() => {
-        if (aiTargetFiles) {
-            return;
-        }
-        
-        if (JSON.stringify(localFiles) === JSON.stringify(files)) {
-            if (saveStatus !== 'saved') {
-                 setSaveStatus('saved');
+        // Automatically open index.html if no tabs are open
+        if (files.length > 0 && openFilePaths.length === 0) {
+            const indexPath = files.find(f => f.path === 'index.html')?.path;
+            if(indexPath) {
+                setOpenFilePaths([indexPath]);
+                setActiveFilePath(indexPath);
+            } else if (files[0]) {
+                setOpenFilePaths([files[0].path]);
+                setActiveFilePath(files[0].path);
             }
-            return;
         }
+    }, [files, openFilePaths]);
+    
+    // Auto-save logic
+    useEffect(() => {
+        if (saveStatus === 'unsaved') {
+            const timer = setTimeout(() => {
+                handleManualSave();
+            }, 2000);
+            return () => clearTimeout(timer);
+        }
+    }, [saveStatus]);
 
-        setSaveStatus('unsaved');
-        const timer = setTimeout(() => {
-            setSaveStatus('saving');
-            onFilesChange(localFiles);
-        }, 2000);
+    // --- File & Tab Operations ---
+    const handleFileOpen = useCallback((path: string) => {
+        if (!openFilePaths.includes(path)) {
+            setOpenFilePaths(prev => [...prev, path]);
+        }
+        setActiveFilePath(path);
+    }, [openFilePaths]);
+    
+    const handleCloseTab = useCallback((path: string, isDeletion = false) => {
+        const updatedOpenPaths = openFilePaths.filter(p => p !== path);
+        setOpenFilePaths(updatedOpenPaths);
 
-        return () => clearTimeout(timer);
-    }, [localFiles, files, onFilesChange, aiTargetFiles]);
-
-    const typeContent = (path: string, to: string) => {
-        return new Promise<void>(resolve => {
-            let currentIndex = 0;
-            const startTimestamp = performance.now();
+        if (activeFilePath === path) {
+            const closingIndex = openFilePaths.indexOf(path);
+            if (updatedOpenPaths.length > 0) {
+                const newIndex = Math.max(0, closingIndex - 1);
+                setActiveFilePath(updatedOpenPaths[newIndex]);
+            } else {
+                setActiveFilePath(null);
+            }
+        }
+        if (!isDeletion) {
+             // If a tab with unsaved changes is closed, trigger a save
+            if(editorContentRef.current[path] !== files.find(f => f.path === path)?.content) {
+                handleManualSave();
+            }
+        }
+    }, [activeFilePath, openFilePaths, files]);
     
-            const type = (timestamp: number) => {
-                const elapsed = timestamp - startTimestamp;
-                const progress = Math.min(elapsed / (500 + to.length * 2), 1);
+    const handleCodeChange = (newContent: string) => {
+        if (!activeFilePath || aiTargetFiles) return;
+        if (editorContentRef.current[activeFilePath] !== newContent) {
+            editorContentRef.current[activeFilePath] = newContent;
+            setSaveStatus('unsaved');
+        }
+    };
     
-                const targetIndex = Math.floor(to.length * progress);
-    
-                if (currentIndex < targetIndex) {
-                    currentIndex = targetIndex;
-                    const partialContent = to.substring(0, currentIndex);
-    
-                    setLocalFiles(prevFiles => {
-                        const fileExists = prevFiles.some(f => f.path === path);
-                        if (fileExists) {
-                            return prevFiles.map(f => f.path === path ? { ...f, content: partialContent } : f);
-                        } else {
-                            return [...prevFiles, { path, content: partialContent }];
-                        }
-                    });
-                }
-    
-                if (progress < 1) {
-                    animationFrameRef.current = requestAnimationFrame(type);
-                } else {
-                    setLocalFiles(prevFiles => {
-                        const fileExists = prevFiles.some(f => f.path === path);
-                        if (fileExists) {
-                            return prevFiles.map(f => f.path === path ? { ...f, content: to } : f);
-                        } else {
-                            return [...prevFiles, { path, content: to }];
-                        }
-                    });
-                    setTimeout(resolve, 250);
-                }
-            };
-    
-            animationFrameRef.current = requestAnimationFrame(type);
-        });
+    const handleManualSave = () => {
+        if (aiTargetFiles) return;
+        setSaveStatus('saving');
+        const updatedFiles = files.map(file => ({
+            ...file,
+            content: editorContentRef.current[file.path] ?? file.content,
+        }));
+        onFilesChange(updatedFiles);
+        // Defer setting to saved to allow parent state to update
+        setTimeout(() => setSaveStatus('saved'), 500);
     };
 
+    // --- AI Animation Logic ---
     useEffect(() => {
         if (aiTargetFiles && onAnimationComplete && onAnimationStart) {
+            const typeContent = (path: string, to: string): Promise<void> => {
+                return new Promise(resolve => {
+                    let currentContent = "";
+                    const charsPerFrame = Math.max(1, Math.floor(to.length / 200));
+                    const type = () => {
+                        if (currentContent.length < to.length) {
+                            currentContent = to.substring(0, currentContent.length + charsPerFrame);
+                            editorContentRef.current[path] = currentContent;
+                            // Force a re-render by creating a new object for the active file's content
+                            setActiveFileContent(currentContent);
+                            animationFrameRef.current = requestAnimationFrame(type);
+                        } else {
+                            editorContentRef.current[path] = to;
+                            setActiveFileContent(to);
+                            setTimeout(resolve, 50);
+                        }
+                    };
+                    animationFrameRef.current = requestAnimationFrame(type);
+                });
+            };
+
             const animate = async () => {
+                const newPaths = aiTargetFiles.map(f => f.path);
+                setOpenFilePaths(prev => [...new Set([...prev, ...newPaths])]);
+                
                 for (let i = 0; i < aiTargetFiles.length; i++) {
                     const newFile = aiTargetFiles[i];
-                    onAnimationStart(newFile.path, i, aiTargetFiles.length);
+                    onAnimationStart(newFile.path, i + 1, aiTargetFiles.length);
                     setActiveFilePath(newFile.path);
                     await typeContent(newFile.path, newFile.content);
                 }
-                onAnimationComplete();
+                // FIX: Passed the `aiTargetFiles` array to `onAnimationComplete` to satisfy its expected signature.
+                onAnimationComplete(aiTargetFiles);
             };
             animate();
         }
@@ -137,153 +243,286 @@ export const CodeDisplay: React.FC<CodeDisplayProps> = ({
         };
     }, [aiTargetFiles, onAnimationComplete, onAnimationStart]);
 
-    const activeFile = localFiles.find(f => f.path === activeFilePath);
-
-    const handleCodeChange = (newContent: string) => {
-        if (!activeFilePath || aiTargetFiles) return;
-        setLocalFiles(currentFiles =>
-            currentFiles.map(file =>
-                file.path === activeFilePath ? { ...file, content: newContent } : file
-            )
-        );
-    };
-
-    const handleCopy = () => {
-        if (!activeFile) return;
-        navigator.clipboard.writeText(activeFile.content);
-        setCopyStatus('copied');
-        setTimeout(() => setCopyStatus('idle'), 2000);
-    };
-
-    const handleExport = async () => {
-        if (!localFiles || localFiles.length === 0) return;
+    // This local state is needed to force re-render during AI animation
+    const [activeFileContent, setActiveFileContent] = useState('');
+    useEffect(() => {
+        setActiveFileContent(editorContentRef.current[activeFilePath ?? ''] ?? '');
+    }, [activeFilePath]);
     
-        const zip = new JSZip();
-        localFiles.forEach(file => {
-            zip.file(file.path, file.content);
-        });
-    
-        try {
-            const blob = await zip.generateAsync({ type: "blob" });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = "webapp.zip";
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(link.href);
-        } catch (error) {
-            console.error("Failed to generate ZIP file:", error);
-            alert("An error occurred while creating the ZIP file.");
-        }
-    };
-
-    const handleScroll = () => {
-        if (textareaRef.current && preRef.current && lineNumbersRef.current) {
-            const { scrollTop, scrollLeft } = textareaRef.current;
-            preRef.current.scrollTop = scrollTop;
-            preRef.current.scrollLeft = scrollLeft;
-            lineNumbersRef.current.scrollTop = scrollTop;
-        }
-    };
-
-    const lineCount = useMemo(() => (activeFile?.content.match(/\n/g) || []).length + 1, [activeFile?.content]);
-    const fileExtension = useMemo(() => activeFilePath?.split('.').pop() || '', [activeFilePath]);
-    
+    const activeFile = useMemo(() => files.find(f => f.path === activeFilePath), [files, activeFilePath]);
     const isAiEditing = !!aiTargetFiles;
+    const language = useMemo(() => activeFilePath ? getLanguageFromPath(activeFilePath) : 'plaintext', [activeFilePath]);
 
     return (
-        <div className="bg-zinc-900 flex flex-col flex-grow h-full">
-            <div className="flex justify-between items-center p-2 px-4 bg-zinc-800 border-b border-zinc-700">
-                <div className="flex items-center gap-3">
-                     <span className="text-sm font-medium text-zinc-300">
-                        {activeFilePath || 'No file selected'}
-                    </span>
-                    <span className="text-xs text-zinc-400 font-sans italic">
-                        {!isAiEditing && saveStatus === 'unsaved' && 'Unsaved changes'}
-                        {!isAiEditing && saveStatus === 'saving' && 'Saving...'}
-                        {!isAiEditing && saveStatus === 'saved' && files.length > 0 && 'All changes saved'}
-                        {isAiEditing && 'AI is editing...'}
-                    </span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <button onClick={onUndo} disabled={!canUndo || isAiEditing} className="flex items-center gap-1.5 text-sm text-zinc-300 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-800 focus:ring-white" aria-label="Undo change">
-                        <UndoIcon aria-hidden="true" className="w-4 h-4" /> Undo
-                    </button>
-                    <button onClick={onRedo} disabled={!canRedo || isAiEditing} className="flex items-center gap-1.5 text-sm text-zinc-300 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-800 focus:ring-white" aria-label="Redo change">
-                        <RedoIcon aria-hidden="true" className="w-4 h-4" /> Redo
-                    </button>
-                    <div aria-hidden="true" className="h-5 w-px bg-zinc-600"></div>
-                    <button onClick={handleExport} disabled={!localFiles || localFiles.length === 0 || isAiEditing} className="flex items-center gap-1.5 text-sm text-zinc-300 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-800 focus:ring-white" aria-label="Export code as ZIP file">
-                        <ExportIcon aria-hidden="true" className="w-4 h-4" /> Export
-                    </button>
-                    <button onClick={handleCopy} disabled={isAiEditing} className="flex items-center gap-1.5 text-sm text-zinc-300 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-800 focus:ring-white" aria-label="Copy code to clipboard">
-                        {copyStatus === 'copied' ? <CheckIcon aria-hidden="true" className="w-4 h-4 text-green-400"/> : <ClipboardIcon aria-hidden="true" className="w-4 h-4" />}
-                        {copyStatus === 'copied' ? 'Copied!' : 'Copy'}
-                    </button>
-                </div>
-            </div>
-            <div className="flex flex-grow overflow-hidden">
-                <div className="w-48 bg-zinc-800 border-r border-zinc-700 p-2 overflow-y-auto">
-                    <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider px-2 mb-2">Explorer</h3>
-                    <ul className="flex flex-col gap-1">
-                        {localFiles.map(file => (
-                            <li key={file.path}>
+        <div className="bg-zinc-900 flex flex-grow h-full overflow-hidden">
+            <FileExplorer files={files} onFileOpen={handleFileOpen} onFilesChange={onFilesChange} isAiEditing={isAiEditing} />
+            <div className="flex flex-col flex-grow min-w-0">
+                {/* Tab Bar */}
+                <div className="flex-shrink-0 bg-zinc-800 flex items-end">
+                    <div className="flex-grow flex items-center overflow-x-auto">
+                        {openFilePaths.map(path => (
+                            <div
+                                key={path}
+                                onClick={() => !isAiEditing && setActiveFilePath(path)}
+                                className={`flex items-center gap-2 pl-3 pr-2 py-2 border-r border-t-2 text-sm cursor-pointer whitespace-nowrap ${
+                                    activeFilePath === path
+                                        ? 'bg-zinc-900 text-white border-t-zinc-100'
+                                        : 'bg-zinc-700 text-zinc-400 border-t-transparent hover:bg-zinc-900 hover:text-white'
+                                }`}
+                            >
+                                <FileCodeIcon className="w-4 h-4 flex-shrink-0" />
+                                <span>{path.split('/').pop()}</span>
                                 <button
-                                    onClick={() => !isAiEditing && setActiveFilePath(file.path)}
-                                    className={`w-full flex items-center gap-2 text-left text-sm p-2 rounded-md transition-colors ${
-                                        activeFilePath === file.path
-                                            ? 'bg-zinc-700 text-white'
-                                            : 'text-zinc-300 hover:bg-zinc-700/50 hover:text-white'
-                                    } ${isAiEditing ? 'cursor-not-allowed' : ''}`}
+                                    onClick={(e) => { e.stopPropagation(); !isAiEditing && handleCloseTab(path); }}
+                                    className="p-1 rounded-full hover:bg-zinc-600"
+                                    aria-label={`Close ${path}`}
                                     disabled={isAiEditing}
                                 >
-                                    <FileCodeIcon className="w-4 h-4 flex-shrink-0" />
-                                    <span className="truncate">{file.path}</span>
+                                    <XIcon className="w-3.5 h-3.5" />
                                 </button>
-                            </li>
+                            </div>
                         ))}
-                    </ul>
+                    </div>
                 </div>
+
                 <div className="flex-grow relative">
                     {activeFile ? (
-                        <div className="code-editor-wrapper">
-                            <div ref={lineNumbersRef} className="line-numbers">
-                                {Array.from({ length: lineCount }, (_, i) => (
-                                    <span key={i}>{i + 1}</span>
-                                ))}
-                            </div>
-                            <div className="code-editor-main">
-                                <pre ref={preRef} aria-hidden="true">
-                                    <SyntaxHighlighter
-                                        code={activeFile.content + '\n'} /* Add newline to ensure last line is rendered correctly */
-                                        language={fileExtension}
-                                    />
-                                </pre>
-                                <textarea
-                                    ref={textareaRef}
-                                    value={activeFile.content}
-                                    onChange={(e) => handleCodeChange(e.target.value)}
-                                    onScroll={handleScroll}
-                                    readOnly={isAiEditing}
-                                    aria-label={`Code for ${activeFile.path}`}
-                                    spellCheck="false"
-                                    autoCapitalize="off"
-                                    autoComplete="off"
-                                    autoCorrect="off"
-                                />
-                            </div>
-                        </div>
+                        <Editor
+                            key={activeFilePath}
+                            value={activeFileContent}
+                            language={language}
+                            onChange={handleCodeChange}
+                            readOnly={isAiEditing}
+                        />
                     ) : (
                         <div className="flex items-center justify-center h-full text-zinc-500">
-                            Select a file to view its content
+                           {files.length > 0 ? 'Select a file to view its content' : 'Create a file to start'}
                         </div>
                     )}
                 </div>
             </div>
-             <div className="sr-only" role="status" aria-live="polite">
-                {copyStatus === 'copied' && `Content of ${activeFilePath} copied to clipboard`}
+        </div>
+    );
+};
+
+
+// --- FILE EXPLORER SUB-COMPONENT ---
+const FileExplorer: React.FC<{
+    files: File[];
+    onFileOpen: (path: string) => void;
+    onFilesChange: (newFiles: File[]) => void;
+    isAiEditing: boolean;
+}> = ({ files, onFileOpen, onFilesChange, isAiEditing }) => {
+    const [tree, setTree] = useState<TreeNode[]>([]);
+    const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+    const [searchTerm, setSearchTerm] = useState('');
+    const [contextMenu, setContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+    const [editingPath, setEditingPath] = useState<string | null>(null);
+    const [creating, setCreating] = useState<{ type: 'file' | 'folder', parentPath: string } | null>(null);
+    const [inputValue, setInputValue] = useState('');
+    const contextMenuRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        const newTree = buildFileTree(files);
+        setTree(newTree);
+        // Auto-expand root folders if there's only one
+        if (newTree.length === 1 && newTree[0].type === 'folder' && expandedFolders.size === 0) {
+            setExpandedFolders(new Set([newTree[0].path]));
+        }
+    }, [files]);
+    
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+                setContextMenu(null);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    useEffect(() => {
+        if (editingPath || creating) inputRef.current?.focus();
+    }, [editingPath, creating]);
+
+    const handleToggleFolder = (path: string) => {
+        setExpandedFolders(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(path)) newSet.delete(path);
+            else newSet.add(path);
+            return newSet;
+        });
+    };
+
+    const handleContextMenu = (e: React.MouseEvent, path: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setContextMenu({ path, x: e.clientX, y: e.clientY });
+    };
+
+    const closeAllMenus = () => {
+        setContextMenu(null);
+        setEditingPath(null);
+        setCreating(null);
+        setInputValue('');
+    };
+
+    const handleCreate = (type: 'file' | 'folder', parentPath = '') => {
+        closeAllMenus();
+        setCreating({ type, parentPath });
+        if(parentPath) {
+             setExpandedFolders(prev => new Set(prev).add(parentPath));
+        }
+    };
+    
+    const handleRename = () => {
+        if (!contextMenu) return;
+        setEditingPath(contextMenu.path);
+        setInputValue(contextMenu.path.split('/').pop() || '');
+        setContextMenu(null);
+    };
+
+    const handleDelete = () => {
+        if (!contextMenu) return;
+        const { path } = contextMenu;
+        if (window.confirm(`Are you sure you want to delete "${path}"? This cannot be undone.`)) {
+            const isFolder = files.some(f => f.path.startsWith(`${path}/`));
+            const newFiles = isFolder
+                ? files.filter(f => !f.path.startsWith(`${path}/`) && f.path !== path)
+                : files.filter(f => f.path !== path);
+            onFilesChange(newFiles);
+        }
+        closeAllMenus();
+    };
+    
+    const handleSubmitInput = () => {
+        if (!inputValue.trim() || inputValue.includes('/')) {
+            closeAllMenus();
+            return;
+        }
+
+        if (editingPath) {
+            const oldPath = editingPath;
+            const newPath = [...oldPath.split('/').slice(0, -1), inputValue.trim()].join('/');
+            if (oldPath === newPath) { closeAllMenus(); return; }
+            if (files.some(f => f.path === newPath)) { alert('A file with this name already exists.'); return; }
+            
+            const isFolder = files.some(f => f.path.startsWith(`${oldPath}/`));
+            const newFiles = files.map(f => {
+                if (isFolder && f.path.startsWith(`${oldPath}/`)) {
+                    return { ...f, path: f.path.replace(oldPath, newPath) };
+                }
+                if (f.path === oldPath) {
+                    return { ...f, path: newPath };
+                }
+                return f;
+            });
+            onFilesChange(newFiles);
+
+        } else if (creating) {
+            const basePath = creating.parentPath ? `${creating.parentPath}/` : '';
+            const newPath = `${basePath}${inputValue.trim()}`;
+            if (files.some(f => f.path === newPath)) { alert('A file or folder with this name already exists.'); return; }
+            
+            const newFiles = [...files];
+            if (creating.type === 'file') {
+                newFiles.push({ path: newPath, content: '' });
+            } else { // folder
+                newFiles.push({ path: `${newPath}/.gitkeep`, content: '' });
+            }
+            onFilesChange(newFiles);
+        }
+        closeAllMenus();
+    };
+
+    const renderTree = (nodes: TreeNode[], depth = 0): React.ReactNode => {
+        const filteredNodes = nodes.filter(node => {
+            if (!searchTerm) return true;
+            if (node.name.toLowerCase().includes(searchTerm.toLowerCase())) return true;
+            if (node.type === 'folder' && node.children) {
+                return node.children.some(child => child.path.toLowerCase().includes(searchTerm.toLowerCase()));
+            }
+            return false;
+        });
+
+        return filteredNodes.map(node => (
+            <div key={node.path}>
+                <div
+                    onClick={() => node.type === 'folder' ? handleToggleFolder(node.path) : onFileOpen(node.path)}
+                    onContextMenu={(e) => handleContextMenu(e, node.path)}
+                    className={`flex items-center pr-2 py-1 text-sm rounded-md cursor-pointer group hover:bg-zinc-700/50 ${
+                        creating?.parentPath === node.path ? 'bg-zinc-700/50' : ''
+                    }`}
+                    style={{ paddingLeft: `${depth * 1 + 0.5}rem` }}
+                >
+                    {node.type === 'folder' ? (
+                        <>
+                            <ChevronDownIcon className={`w-4 h-4 mr-1 flex-shrink-0 transition-transform ${expandedFolders.has(node.path) ? 'rotate-0' : '-rotate-90'}`} />
+                            {expandedFolders.has(node.path) ? <FolderOpenIcon className="w-4 h-4 mr-2 flex-shrink-0" /> : <FolderIcon className="w-4 h-4 mr-2 flex-shrink-0" />}
+                        </>
+                    ) : (
+                        <FileCodeIcon className="w-4 h-4 mr-2 flex-shrink-0 ml-[20px]" />
+                    )}
+                    
+                    {editingPath === node.path ? (
+                        <input
+                            ref={inputRef}
+                            type="text" value={inputValue} onChange={e => setInputValue(e.target.value)}
+                            onBlur={handleSubmitInput} onKeyDown={e => e.key === 'Enter' ? handleSubmitInput() : e.key === 'Escape' && closeAllMenus()}
+                            className="w-full bg-zinc-900 text-white rounded p-0.5 -m-0.5"
+                            onClick={e => e.stopPropagation()}
+                        />
+                    ) : <span className="truncate flex-grow">{node.name}</span>}
+                    
+                    <button onClick={(e) => handleContextMenu(e, node.path)} className="opacity-0 group-hover:opacity-100 ml-auto p-0.5 rounded hover:bg-zinc-600"><MoreVerticalIcon className="w-4 h-4" /></button>
+                </div>
+                {expandedFolders.has(node.path) && node.children && renderTree(node.children, depth + 1)}
+                {creating && creating.parentPath === node.path && (
+                    <div style={{ paddingLeft: `${(depth + 1) * 1 + 0.5}rem` }} className="py-1">
+                        <input ref={inputRef} type="text" value={inputValue} onChange={e => setInputValue(e.target.value)}
+                            onBlur={handleSubmitInput} onKeyDown={e => e.key === 'Enter' ? handleSubmitInput() : e.key === 'Escape' && closeAllMenus()}
+                            className="w-full bg-zinc-900 text-white rounded p-0.5"
+                            placeholder={creating.type === 'file' ? "New file..." : "New folder..."}
+                            onClick={e => e.stopPropagation()} />
+                    </div>
+                )}
             </div>
+        ));
+    };
+
+    return (
+        <div className="w-64 bg-zinc-800 border-r border-zinc-700 flex flex-col flex-shrink-0 text-zinc-300">
+            <div className="p-2 border-b border-zinc-700 flex items-center gap-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider flex-grow">Explorer</h3>
+                <button onClick={() => handleCreate('file')} title="New File" className="p-1 rounded hover:bg-zinc-700"><PlusIcon className="w-4 h-4" /></button>
+                <button onClick={() => handleCreate('folder')} title="New Folder" className="p-1 rounded hover:bg-zinc-700"><FolderIcon className="w-4 h-4" /></button>
+            </div>
+            <div className="p-2 border-b border-zinc-700">
+                <div className="relative">
+                    <SearchIcon className="w-4 h-4 absolute top-1/2 left-2 -translate-y-1/2 text-zinc-500"/>
+                    <input type="text" placeholder="Search files..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-md py-1 pl-7 pr-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-500" />
+                </div>
+            </div>
+            <div className="flex-grow p-1 overflow-y-auto">
+                {renderTree(tree)}
+                {creating && creating.parentPath === '' && (
+                    <div className="p-1">
+                        <input ref={inputRef} type="text" value={inputValue} onChange={e => setInputValue(e.target.value)}
+                            onBlur={handleSubmitInput} onKeyDown={e => e.key === 'Enter' ? handleSubmitInput() : e.key === 'Escape' && closeAllMenus()}
+                            className="w-full bg-zinc-900 text-white rounded p-0.5"
+                            placeholder={creating.type === 'file' ? "New file..." : "New folder..."}
+                        />
+                    </div>
+                )}
+            </div>
+
+            {contextMenu && (
+                <div ref={contextMenuRef} style={{ top: contextMenu.y, left: contextMenu.x }} className="fixed z-50 bg-zinc-900 rounded-md shadow-lg border border-zinc-700 py-1 w-40 animate-fade-in">
+                    <button onClick={handleRename} className="w-full text-left px-3 py-1.5 text-sm hover:bg-zinc-700 flex items-center gap-2"><PencilIcon className="w-4 h-4"/> Rename</button>
+                    <button onClick={handleDelete} className="w-full text-left px-3 py-1.5 text-sm hover:bg-zinc-700 flex items-center gap-2 text-red-400"><TrashIcon className="w-4 h-4"/> Delete</button>
+                </div>
+            )}
         </div>
     );
 };

@@ -1,3 +1,5 @@
+
+
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { Session } from '@supabase/supabase-js';
 
@@ -76,6 +78,7 @@ const App: React.FC = () => {
     const [isDiscussModeActive, setIsDiscussModeActive] = useState<boolean>(false);
     const [aiTargetFiles, setAiTargetFiles] = useState<File[] | undefined>(undefined);
     const [wizardData, setWizardData] = useState<{ name: string; prompt: string; prefill?: WizardPrefillData } | null>(null);
+    const [initialProjectsLoaded, setInitialProjectsLoaded] = useState<boolean>(false);
     
     const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
     const [isApiKeyRequired, setIsApiKeyRequired] = useState(false);
@@ -142,9 +145,10 @@ const App: React.FC = () => {
                         createdAt: p.created_at,
                     }));
                     setProjects(fetchedProjects);
-                    if (fetchedProjects.length > 0 && !activeProjectId) {
+                    if (fetchedProjects.length > 0 && !activeProjectId && !initialProjectsLoaded) {
                         setActiveProjectId(fetchedProjects[0].id);
                     }
+                    setInitialProjectsLoaded(true);
                 }
                 setIsLoading(false);
             } else {
@@ -152,6 +156,7 @@ const App: React.FC = () => {
                 setProjects([]);
                 setActiveProjectId(null);
                 setIsLoading(false);
+                setInitialProjectsLoaded(false);
             }
         };
 
@@ -309,15 +314,17 @@ const App: React.FC = () => {
         }));
     }, []);
 
-    const handleAnimationComplete = useCallback(() => {
-        if (!activeProject || !aiTargetFiles) return;
+    // FIX: Updated `handleAnimationComplete` to accept `animatedFiles` as an argument.
+    // This makes the data flow more explicit and avoids potential stale state issues.
+    const handleAnimationComplete = useCallback((animatedFiles: File[]) => {
+        if (!activeProject || !animatedFiles) return;
 
         const runAsync = async () => {
             setGenerationStatus(prev => ({ ...prev, stage: 'applying', message: 'Applying changes...' }));
             await new Promise(resolve => setTimeout(resolve, 500));
             
             const lastPrompt = activeProject.codeHistory.history[activeProject.codeHistory.currentIndex]?.prompt || "AI edit";
-            const newEntry: HistoryEntry = { files: aiTargetFiles, prompt: lastPrompt, timestamp: Date.now() };
+            const newEntry: HistoryEntry = { files: animatedFiles, prompt: lastPrompt, timestamp: Date.now() };
     
             const updatedProject = { ...activeProject };
             const newHistory = updatedProject.codeHistory.history.slice(0, updatedProject.codeHistory.currentIndex + 1);
@@ -343,7 +350,7 @@ const App: React.FC = () => {
         };
 
         runAsync();
-    }, [activeProject, aiTargetFiles]);
+    }, [activeProject]);
 
     const handleGenerate = useCallback(async (prompt: string, attachments: globalThis.File[] = []) => {
         if (generationStatus.stage !== 'idle' || !prompt || !activeProject) return;

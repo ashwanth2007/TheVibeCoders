@@ -337,7 +337,7 @@ export const generateSuggestions = async (files: File[]): Promise<Suggestion[]> 
         
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: { parts: [{ text: textPrompt }] },
+            contents: textPrompt,
             config: {
                 systemInstruction: SUGGESTION_GENERATION_INSTRUCTION,
                 responseMimeType: 'application/json',
@@ -369,7 +369,7 @@ export const discussCode = async (prompt: string, files: File[]): Promise<string
         
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-pro',
-            contents: { parts: [{ text: textPrompt }] },
+            contents: textPrompt,
             config: {
                 systemInstruction: DISCUSS_INSTRUCTION,
             }

@@ -14,7 +14,8 @@
     "@google/genai": "^1.25.0",
     "jszip": "3.10.1",
     "@supabase/supabase-js": "^2.44.4",
-    "firebase": "^12.4.0"
+    "firebase": "^12.4.0",
+    "monaco-editor": "^0.54.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
